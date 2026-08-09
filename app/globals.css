@@ -1,0 +1,139 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --bg-deep: #0f2e1c;
+  --bg-mid: #1a4d2e;
+  --bg-court: #246b3e;
+  --line: #e8f5a0;
+  --lime: #f5d76e;
+  --accent-hot: #ff8a3d;
+  --ink: #f4f7f0;
+  --ink-muted: rgba(244, 247, 240, 0.72);
+  --ink-dark: #122418;
+  --panel: rgba(255, 255, 255, 0.08);
+  --panel-solid: #f7faf3;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+
+  --background: #0f2e1c;
+  --foreground: #f4f7f0;
+  --card: #f7faf3;
+  --card-foreground: #122418;
+  --popover: #143524;
+  --popover-foreground: #f4f7f0;
+  --primary: #f5d76e;
+  --primary-foreground: #122418;
+  --secondary: rgba(255, 255, 255, 0.1);
+  --secondary-foreground: #f4f7f0;
+  --muted: rgba(255, 255, 255, 0.08);
+  --muted-foreground: rgba(244, 247, 240, 0.72);
+  --accent: #c4a93a;
+  --accent-foreground: #122418;
+  --destructive: #ff6b4a;
+  --border: rgba(232, 245, 160, 0.35);
+  --input: rgba(232, 245, 160, 0.35);
+  --ring: #f5d76e;
+  --chart-1: #f5d76e;
+  --chart-2: #e8f5a0;
+  --chart-3: #ff8a3d;
+  --chart-4: #246b3e;
+  --chart-5: #1a4d2e;
+  --radius: 0.35rem;
+  --sidebar: #1a4d2e;
+  --sidebar-foreground: #f4f7f0;
+  --sidebar-primary: #f5d76e;
+  --sidebar-primary-foreground: #122418;
+  --sidebar-accent: rgba(255, 255, 255, 0.08);
+  --sidebar-accent-foreground: #f4f7f0;
+  --sidebar-border: rgba(232, 245, 160, 0.28);
+  --sidebar-ring: #f5d76e;
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+  --font-heading: var(--font-display);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply text-foreground min-h-dvh;
+    margin: 0;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    background:
+      radial-gradient(ellipse 90% 60% at 10% -10%, rgba(245, 215, 110, 0.22), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 100% 0%, rgba(255, 138, 61, 0.18), transparent 50%),
+      linear-gradient(165deg, var(--bg-deep) 0%, var(--bg-mid) 42%, var(--bg-court) 100%);
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.07;
+    background-image: repeating-linear-gradient(
+      -12deg,
+      transparent,
+      transparent 14px,
+      rgba(255, 255, 255, 0.35) 14px,
+      rgba(255, 255, 255, 0.35) 15px
+    );
+  }
+}
+
+.font-display {
+  font-family: var(--font-display), sans-serif;
+}
