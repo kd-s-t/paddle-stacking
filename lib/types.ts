@@ -1,8 +1,15 @@
 export type Player = {
   id: string;
   name: string;
+  /** Permanent paddle # for this session (join order). */
+  number: number;
   gamesPlayed: number;
   wins: number;
+  losses: number;
+  /** Last decided game outcome; used to restack winners ahead of losers. */
+  lastOutcome?: "win" | "loss";
+  /** Session playSeq when they last left a court (for rest / no back-to-back). */
+  lastPlaySeq?: number;
 };
 
 export type MatchResult = {
@@ -47,6 +54,8 @@ export type SessionSnapshot = SessionConfig & {
   players: Player[];
   queue: string[];
   courts: CourtSlot[];
+  /** Bumps every time a court finishes; used so players rest before replaying. */
+  playSeq: number;
   startedAt: number;
   updatedAt: number;
   status: SessionStatus;

@@ -105,7 +105,7 @@ export function SetupForm({ onStart, onBack }: Props) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={DEFAULT_SESSION_TITLE}
-            className="h-12 border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-base"
+            className="h-12 border-[var(--border)] bg-[var(--panel-raised)] text-base"
           />
         </FieldCard>
         <FieldCard
@@ -121,7 +121,7 @@ export function SetupForm({ onStart, onBack }: Props) {
           >
             <SelectTrigger
               id="courts"
-              className="h-12 w-full border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-base"
+              className="h-12 w-full border-[var(--border)] bg-[var(--panel-raised)] text-base"
             >
               <SelectValue />
             </SelectTrigger>
@@ -154,7 +154,7 @@ export function SetupForm({ onStart, onBack }: Props) {
           >
             <SelectTrigger
               id="hours"
-              className="h-12 w-full border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-base"
+              className="h-12 w-full border-[var(--border)] bg-[var(--panel-raised)] text-base"
             >
               <SelectValue />
             </SelectTrigger>
@@ -211,7 +211,7 @@ function FieldCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="border-[var(--border)] bg-[rgba(8,28,16,0.45)] text-foreground ring-0">
+    <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground ring-0">
       <CardContent className="grid gap-2 pt-4">
         <Label
           htmlFor={htmlFor}

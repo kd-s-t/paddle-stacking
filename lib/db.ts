@@ -1,4 +1,4 @@
-import { migrateSessionShape } from "./rotation";
+import { ensurePlayerNumbers, migrateSessionShape } from "./rotation";
 import {
   DB_INDEX_KEY,
   DB_SESSION_PREFIX,
@@ -48,14 +48,27 @@ function normalizeSession(parsed: Session): Session | null {
     title: parsed.title?.trim() || DEFAULT_SESSION_TITLE,
     status: parsed.status === "ended" ? "ended" : "active",
     updatedAt: parsed.updatedAt ?? parsed.startedAt ?? Date.now(),
+    playSeq: typeof parsed.playSeq === "number" ? parsed.playSeq : 0,
     undoStack: Array.isArray(parsed.undoStack) ? parsed.undoStack : [],
-    players: parsed.players.map((p) => ({
-      ...p,
-      wins: typeof p.wins === "number" ? p.wins : 0,
-      gamesPlayed: typeof p.gamesPlayed === "number" ? p.gamesPlayed : 0,
-    })),
+    players: parsed.players.map((p, index) => {
+      const wins = typeof p.wins === "number" ? p.wins : 0;
+      const gamesPlayed =
+        typeof p.gamesPlayed === "number" ? p.gamesPlayed : 0;
+      const losses =
+        typeof p.losses === "number"
+          ? p.losses
+          : Math.max(0, gamesPlayed - wins);
+      return {
+        ...p,
+        number: typeof p.number === "number" && p.number > 0 ? p.number : index + 1,
+        wins,
+        losses,
+        gamesPlayed,
+        lastPlaySeq: typeof p.lastPlaySeq === "number" ? p.lastPlaySeq : 0,
+      };
+    }),
   } as Session;
-  return migrateSessionShape(base);
+  return ensurePlayerNumbers(migrateSessionShape(base));
 }
 
 /** One-time migrate legacy single-session localStorage into the local DB. */

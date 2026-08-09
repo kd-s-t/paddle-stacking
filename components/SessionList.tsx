@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { Clock3, Layers3, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +23,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { WelcomeOverlay } from "@/components/WelcomeOverlay";
 import { deleteSession, listSessions } from "@/lib/db";
 import { formatDuration } from "@/lib/rotation";
 import type { SessionSummary } from "@/lib/types";
@@ -47,13 +48,16 @@ export function SessionList() {
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(
     null,
   );
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
 
   function refresh() {
     setSessions(listSessions());
   }
 
-  useEffect(() => {
-    refresh();
+  useLayoutEffect(() => {
+    const list = listSessions();
+    setSessions(list);
+    setWelcomeOpen(list.length === 0);
     setHydrated(true);
   }, []);
 
@@ -65,9 +69,11 @@ export function SessionList() {
   }
 
   if (!hydrated) {
-    return (
-      <p className="my-16 text-center text-muted-foreground">Loading…</p>
-    );
+    return null;
+  }
+
+  if (welcomeOpen && sessions.length === 0) {
+    return <WelcomeOverlay onDismiss={() => setWelcomeOpen(false)} />;
   }
 
   return (
@@ -99,7 +105,7 @@ export function SessionList() {
       </Button>
 
       {sessions.length === 0 ? (
-        <Card className="border-[var(--border)] bg-[rgba(8,28,16,0.45)] text-foreground ring-0">
+        <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground ring-0">
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
             No sessions yet. Create one to start stacking.
           </CardContent>
@@ -113,7 +119,7 @@ export function SessionList() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.03 }}
             >
-              <Card className="border-[var(--border)] bg-[rgba(8,28,16,0.55)] text-foreground ring-0">
+              <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground ring-0">
                 <CardHeader className="gap-2 px-4 pt-4 pb-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">

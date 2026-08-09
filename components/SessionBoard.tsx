@@ -63,6 +63,7 @@ import {
   playingPlayers,
   populateStack,
   removePlayer,
+  renamePlayer,
   rotateCourt,
   sessionStats,
   setMatchScore,
@@ -92,6 +93,8 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
   const [bulk, setBulk] = useState("");
   const [showBulk, setShowBulk] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<Player | null>(null);
+  const [pendingRename, setPendingRename] = useState<Player | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(session.title);
   const [editHours, setEditHours] = useState(session.hours);
@@ -143,6 +146,23 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
     if (!pendingRemove) return;
     commit(removePlayer(session, pendingRemove.id), true);
     setPendingRemove(null);
+  }
+
+  function openRename(player: Player) {
+    setPendingRename(player);
+    setRenameValue(player.name);
+  }
+
+  function saveRename(e: FormEvent) {
+    e.preventDefault();
+    if (!pendingRename) return;
+    const next = renameValue.trim();
+    if (!next || next === pendingRename.name) {
+      setPendingRename(null);
+      return;
+    }
+    commit(renamePlayer(session, pendingRename.id, next), true);
+    setPendingRename(null);
   }
 
   function openEdit() {
@@ -255,7 +275,7 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
                 id="edit-title"
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
-                className="h-12 border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-base"
+                className="h-12 border-[var(--border)] bg-[var(--panel-raised)] text-base"
               />
             </div>
             <div className="grid gap-2">
@@ -270,7 +290,7 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
               >
                 <SelectTrigger
                   id="edit-hours"
-                  className="h-12 w-full border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-base"
+                  className="h-12 w-full border-[var(--border)] bg-[var(--panel-raised)] text-base"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -334,7 +354,7 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
                 autoComplete="off"
                 autoCorrect="off"
                 autoFocus
-                className="h-12 border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-base"
+                className="h-12 border-[var(--border)] bg-[var(--panel-raised)] text-base"
               />
               <Button
                 type="submit"
@@ -379,7 +399,7 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
                     placeholder={"Alex\nJordan\nSam\nRiley"}
                     rows={4}
                     spellCheck={false}
-                    className="border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-base"
+                    className="border-[var(--border)] bg-[var(--panel-raised)] text-base"
                   />
                   <Button
                     type="submit"
@@ -395,14 +415,14 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
         </DialogContent>
       </Dialog>
 
-      <Card className="border-[var(--border)] border-l-4 border-l-[var(--accent-hot)] bg-[rgba(8,28,16,0.55)] text-foreground shadow-none ring-0">
+      <Card className="border-[var(--border)] border-l-4 border-l-[var(--accent-hot)] bg-[var(--panel)] text-foreground shadow-none ring-0">
         <CardHeader className="gap-1 px-4 pt-4 pb-2">
           <CardTitle className="font-display flex items-center gap-2 text-xl tracking-wide text-[var(--line)] uppercase">
             <Play className="size-5 fill-primary text-primary" />
             Playing · {playing.length}
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            Courts finish on their own. Tap Win (or Rotate) on that court only.
+            Win: back to the starting line. Winners meet winners (swap partners).
           </CardDescription>
         </CardHeader>
         <Separator className="bg-[var(--border)]" />
@@ -417,6 +437,7 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
                 key={match.court}
                 match={match}
                 onRemove={setPendingRemove}
+                onRename={openRename}
                 onWinner={(winner) =>
                   commit(decideAndRotate(session, match.court, winner), true)
                 }
@@ -432,14 +453,14 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
         </CardContent>
       </Card>
 
-      <Card className="border-[var(--border)] bg-[rgba(8,28,16,0.55)] text-foreground shadow-none ring-0">
+      <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground shadow-none ring-0">
         <CardHeader className="gap-1 px-4 pt-4 pb-2">
           <CardTitle className="font-display flex items-center gap-2 text-xl tracking-wide text-[var(--line)] uppercase">
             <Layers3 className="size-5 text-primary" />
             Waiting · {waiting.length}
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            Next up when a court rotates.
+            # is permanent. Line order is who is next. Tap a name to rename.
           </CardDescription>
         </CardHeader>
         <Separator className="bg-[var(--border)]" />
@@ -447,8 +468,8 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
           <PlayerList
             players={waiting}
             empty="No one waiting."
-            startIndex={1}
             onRemove={setPendingRemove}
+            onRename={openRename}
           />
         </CardContent>
       </Card>
@@ -484,6 +505,44 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
         </AlertDialogContent>
       </AlertDialog>
 
+      <Dialog
+        open={pendingRename != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRename(null);
+        }}
+      >
+        <DialogContent className="border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display tracking-wide uppercase">
+              Rename player
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Update the name on the stack and courts.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="grid gap-3" onSubmit={saveRename}>
+            <div className="grid gap-2">
+              <Label htmlFor="rename-player">Name</Label>
+              <Input
+                id="rename-player"
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                className="h-12 border-[var(--border)] bg-[var(--panel-raised)]"
+              />
+            </div>
+            <Button
+              type="submit"
+              size="lg"
+              className="font-display h-12 tracking-wide uppercase"
+              disabled={!renameValue.trim()}
+            >
+              Save name
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
     </motion.div>
   );
 }
@@ -491,12 +550,14 @@ export function SessionBoard({ session, onChange, onEnd }: Props) {
 function MatchCard({
   match,
   onRemove,
+  onRename,
   onWinner,
   onScore,
   onRotate,
 }: {
   match: Match;
   onRemove: (player: Player) => void;
+  onRename: (player: Player) => void;
   onWinner: (winner: "A" | "B") => void;
   onScore: (side: "A" | "B", raw: string) => void;
   onRotate: () => void;
@@ -521,7 +582,7 @@ function MatchCard({
   }
 
   return (
-    <div className="rounded-sm bg-primary/10 outline outline-primary/30 px-3 py-3">
+    <div className="rounded-sm bg-[var(--panel-raised)] outline outline-primary/25 px-3 py-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="font-display text-sm tracking-wide text-primary uppercase">
           Court {match.court}
@@ -537,6 +598,7 @@ function MatchCard({
         <TeamSide
           players={match.teamA}
           onRemove={onRemove}
+          onRename={onRename}
           align="end"
           outcome={
             winner === "A" ? "win" : winner === "B" ? "lose" : undefined
@@ -548,6 +610,7 @@ function MatchCard({
         <TeamSide
           players={match.teamB}
           onRemove={onRemove}
+          onRename={onRename}
           align="start"
           outcome={
             winner === "B" ? "win" : winner === "A" ? "lose" : undefined
@@ -586,7 +649,7 @@ function MatchCard({
               placeholder="0"
               value={scoreA ?? ""}
               onChange={(e) => onScore("A", e.target.value)}
-              className="h-11 w-16 border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-center text-base tabular-nums"
+              className="h-11 w-16 border-[var(--border)] bg-[var(--panel-raised)] text-center text-base tabular-nums"
               aria-label="Left team score"
             />
             <span className="font-display text-sm font-bold text-muted-foreground">
@@ -600,7 +663,7 @@ function MatchCard({
               placeholder="0"
               value={scoreB ?? ""}
               onChange={(e) => onScore("B", e.target.value)}
-              className="h-11 w-16 border-[var(--border)] bg-[rgba(8,28,16,0.35)] text-center text-base tabular-nums"
+              className="h-11 w-16 border-[var(--border)] bg-[var(--panel-raised)] text-center text-base tabular-nums"
               aria-label="Right team score"
             />
           </div>
@@ -644,11 +707,13 @@ function MatchCard({
 function TeamSide({
   players,
   onRemove,
+  onRename,
   align,
   outcome,
 }: {
   players: Player[];
   onRemove: (player: Player) => void;
+  onRename: (player: Player) => void;
   align: "start" | "end";
   outcome?: "win" | "lose";
 }) {
@@ -684,13 +749,25 @@ function TeamSide({
           <li
             key={p.id}
             className={cn(
-              "flex min-h-10 items-center gap-1 rounded-sm bg-[rgba(8,28,16,0.45)] px-2 py-1.5",
+              "flex min-h-10 items-center gap-1 rounded-sm bg-[var(--panel-raised)] px-2 py-1.5",
               align === "end" && "flex-row-reverse",
               outcome === "win" && "outline outline-primary/50",
               outcome === "lose" && "opacity-70",
             )}
           >
-            <span className="truncate font-semibold">{p.name}</span>
+            <span className="font-display shrink-0 text-xs font-bold text-primary tabular-nums">
+              #{p.number ?? "?"}
+            </span>
+            <button
+              type="button"
+              className="truncate text-left font-semibold"
+              onClick={() => onRename(p)}
+            >
+              {p.name}
+            </button>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {p.wins}-{p.losses}
+            </span>
             <button
               type="button"
               aria-label={`Remove ${p.name}`}
@@ -709,18 +786,18 @@ function TeamSide({
 function PlayerList({
   players,
   empty,
-  startIndex = 0,
   onRemove,
+  onRename,
 }: {
   players: Player[];
   empty: string;
-  startIndex?: number;
   onRemove: (player: Player) => void;
+  onRename: (player: Player) => void;
 }) {
   return (
     <ol className="grid max-h-[min(45vh,420px)] gap-1.5 overflow-auto overscroll-contain">
       <AnimatePresence initial={false}>
-        {players.map((p, i) => (
+        {players.map((p) => (
           <motion.li
             key={p.id}
             layout
@@ -728,14 +805,26 @@ function PlayerList({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -8 }}
             transition={{ duration: 0.2 }}
-            className="grid min-h-12 grid-cols-[2rem_1fr_auto_auto] items-center gap-2 rounded-sm bg-white/5 px-2 py-2"
+            className="grid min-h-12 grid-cols-[2.25rem_1fr_auto_auto] items-center gap-2 rounded-sm bg-[var(--panel-raised)] px-2 py-2"
           >
-            <span className="font-display font-bold text-primary">
-              {startIndex + i + 1}
+            <span
+              className="font-display font-bold text-primary tabular-nums"
+              title="Paddle number (permanent for this session)"
+            >
+              #{p.number ?? "?"}
             </span>
-            <span className="truncate font-semibold">{p.name}</span>
-            <span className="font-variant-numeric text-sm text-muted-foreground tabular-nums">
-              {p.gamesPlayed}g
+            <button
+              type="button"
+              className="truncate text-left font-semibold"
+              onClick={() => onRename(p)}
+            >
+              {p.name}
+            </button>
+            <span
+              className="font-variant-numeric text-sm text-muted-foreground tabular-nums"
+              title={`${p.wins} wins · ${p.losses} losses · ${p.gamesPlayed} games`}
+            >
+              {p.wins}-{p.losses}
             </span>
             <button
               type="button"
