@@ -6,6 +6,8 @@ export type Player = {
   gamesPlayed: number;
   wins: number;
   losses: number;
+  /** True when they left the stack for the day (stats kept). */
+  done?: boolean;
   /** Last decided game outcome; used to restack winners ahead of losers. */
   lastOutcome?: "win" | "loss";
   /** Session playSeq when they last left a court (for rest / no back-to-back). */
@@ -25,6 +27,8 @@ export type CourtSlot = {
   id: number;
   /** 0 or 4 player ids */
   playerIds: string[];
+  /** When the current foursome started on this court */
+  startedAt?: number;
   result?: MatchResult;
 };
 
@@ -33,6 +37,8 @@ export type Match = {
   teamA: Player[];
   teamB: Player[];
   result?: MatchResult;
+  /** When this match started on court */
+  startedAt?: number;
   /** True when this court has enough players for doubles */
   ready: boolean;
 };

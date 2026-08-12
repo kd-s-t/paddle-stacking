@@ -1,4 +1,8 @@
-import { ensurePlayerNumbers, migrateSessionShape } from "./rotation";
+import {
+  ensurePlayerNumbers,
+  finishSession,
+  migrateSessionShape,
+} from "./rotation";
 import {
   DB_INDEX_KEY,
   DB_SESSION_PREFIX,
@@ -50,6 +54,19 @@ function normalizeSession(parsed: Session): Session | null {
     updatedAt: parsed.updatedAt ?? parsed.startedAt ?? Date.now(),
     playSeq: typeof parsed.playSeq === "number" ? parsed.playSeq : 0,
     undoStack: Array.isArray(parsed.undoStack) ? parsed.undoStack : [],
+    courts: Array.isArray(parsed.courts)
+      ? parsed.courts.map((c) => ({
+          ...c,
+          startedAt:
+            Array.isArray(c.playerIds) &&
+            c.playerIds.length === 4 &&
+            typeof c.startedAt === "number"
+              ? c.startedAt
+              : Array.isArray(c.playerIds) && c.playerIds.length === 4
+                ? Date.now()
+                : undefined,
+        }))
+      : parsed.courts,
     players: parsed.players.map((p, index) => {
       const wins = typeof p.wins === "number" ? p.wins : 0;
       const gamesPlayed =
@@ -64,6 +81,7 @@ function normalizeSession(parsed: Session): Session | null {
         wins,
         losses,
         gamesPlayed,
+        done: p.done === true,
         lastPlaySeq: typeof p.lastPlaySeq === "number" ? p.lastPlaySeq : 0,
       };
     }),
@@ -146,7 +164,7 @@ export function deleteSession(id: string): void {
 export function endSession(id: string): Session | null {
   const session = getSession(id);
   if (!session) return null;
-  const ended = { ...session, status: "ended" as const, updatedAt: Date.now() };
+  const ended = finishSession(session);
   putSession(ended);
   return ended;
 }

@@ -25,8 +25,14 @@ export default function SessionPage() {
     putSession(session);
   }, [session, hydrated]);
 
+  function handleLeave() {
+    router.push("/");
+  }
+
   function handleEnd() {
-    if (session) endSession(session.id);
+    if (!session) return;
+    const ended = endSession(session.id);
+    if (ended) setSession(ended);
     router.push("/");
   }
 
@@ -62,6 +68,7 @@ export default function SessionPage() {
       <SessionBoard
         session={session}
         onChange={setSession}
+        onLeave={handleLeave}
         onEnd={handleEnd}
       />
     </main>

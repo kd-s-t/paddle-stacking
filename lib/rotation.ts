@@ -261,7 +261,9 @@ export function takeNextGroup(
   const rested: string[] = [];
   const fresh: string[] = [];
   for (const pid of queue) {
-    const last = byId.get(pid)?.lastPlaySeq ?? 0;
+    const player = byId.get(pid);
+    if (!player || player.done) continue;
+    const last = player.lastPlaySeq ?? 0;
     if (playSeq > 0 && last >= playSeq) fresh.push(pid);
     else rested.push(pid);
   }
@@ -301,7 +303,11 @@ export function takeNextGroup(
 
 /** Pull from queue into any empty courts that can take 4. */
 export function fillCourts(session: Session): Session {
-  let queue = [...session.queue];
+  const byId = playerMap(session);
+  let queue = session.queue.filter((pid) => {
+    const p = byId.get(pid);
+    return p != null && !p.done;
+  });
   const courts = session.courts.map((c) => ({
     ...c,
     playerIds: [...c.playerIds],
@@ -319,6 +325,7 @@ export function fillCourts(session: Session): Session {
     }
     queue = taken.queue;
     court.playerIds = seatForFoursome(session, taken.chosen);
+    court.startedAt = Date.now();
     court.result = undefined;
   }
 
@@ -349,18 +356,108 @@ export function populateStack(session: Session, count = 50): Session {
   return addPlayers(session, names);
 }
 
-export function removePlayer(session: Session, playerId: string): Session {
-  const courts = session.courts.map((c) => ({
-    ...c,
-    playerIds: c.playerIds.filter((id) => id !== playerId),
-    result: c.playerIds.includes(playerId) ? undefined : c.result,
-  }));
+function pullPlayerOffCourts(session: Session, playerId: string): Session {
+  const courts = session.courts.map((c) => {
+    const playerIds = c.playerIds.filter((id) => id !== playerId);
+    const removed = c.playerIds.includes(playerId);
+    return {
+      ...c,
+      playerIds,
+      result: removed ? undefined : c.result,
+      startedAt:
+        playerIds.length === PLAYERS_PER_COURT ? c.startedAt : undefined,
+    };
+  });
+
+  return {
+    ...session,
+    queue: session.queue.filter((id) => id !== playerId),
+    courts,
+  };
+}
+
+/** Leave the stack for the day; keep # and W-L. */
+export function markDonePlaying(session: Session, playerId: string): Session {
+  const pulled = pullPlayerOffCourts(session, playerId);
+  return fillCourts({
+    ...pulled,
+    players: pulled.players.map((p) =>
+      p.id === playerId ? { ...p, done: true } : p,
+    ),
+    updatedAt: Date.now(),
+  });
+}
+
+/** Put a done player back at the end of the waiting line. */
+export function rejoinStack(session: Session, playerId: string): Session {
+  const player = session.players.find((p) => p.id === playerId);
+  if (!player?.done) return session;
+  if (session.queue.includes(playerId)) {
+    return {
+      ...session,
+      players: session.players.map((p) =>
+        p.id === playerId ? { ...p, done: false } : p,
+      ),
+      updatedAt: Date.now(),
+    };
+  }
 
   return fillCourts({
     ...session,
-    players: session.players.filter((p) => p.id !== playerId),
-    queue: session.queue.filter((id) => id !== playerId),
-    courts,
+    players: session.players.map((p) =>
+      p.id === playerId ? { ...p, done: false } : p,
+    ),
+    queue: [...session.queue, playerId],
+    updatedAt: Date.now(),
+  });
+}
+
+export function removePlayer(session: Session, playerId: string): Session {
+  const pulled = pullPlayerOffCourts(session, playerId);
+  return fillCourts({
+    ...pulled,
+    players: pulled.players.filter((p) => p.id !== playerId),
+  });
+}
+
+export function donePlayers(session: Session): Player[] {
+  return session.players
+    .filter((p) => p.done)
+    .sort((a, b) => a.number - b.number);
+}
+
+/** End open play: clear courts/queue, keep everyone + stats, mark done. */
+export function finishSession(session: Session): Session {
+  return {
+    ...session,
+    status: "ended",
+    players: session.players.map((p) => ({ ...p, done: true })),
+    queue: [],
+    courts: session.courts.map((c) => ({
+      ...c,
+      playerIds: [],
+      result: undefined,
+      startedAt: undefined,
+    })),
+    updatedAt: Date.now(),
+  };
+}
+
+/** Resume an ended session: everyone back in the waiting line. */
+export function resumeSession(session: Session): Session {
+  const players = session.players.map((p) => ({ ...p, done: false }));
+  return fillCourts({
+    ...session,
+    status: "active",
+    players,
+    queue: players.map((p) => p.id),
+    courts: session.courts.map((c) => ({
+      ...c,
+      playerIds: [],
+      result: undefined,
+      startedAt: undefined,
+    })),
+    updatedAt: Date.now(),
   });
 }
 
@@ -385,7 +482,7 @@ export function waitingPlayers(session: Session): Player[] {
   const byId = playerMap(session);
   return session.queue
     .map((pid) => byId.get(pid))
-    .filter((p): p is Player => Boolean(p));
+    .filter((p): p is Player => p != null && !p.done);
 }
 
 export function playingPlayers(session: Session): Player[] {
@@ -403,12 +500,14 @@ export function playingMatches(session: Session): Match[] {
     const players = court.playerIds
       .map((pid) => byId.get(pid))
       .filter((p): p is Player => Boolean(p));
+    const ready = players.length === PLAYERS_PER_COURT;
     return {
       court: court.id,
       teamA: players.slice(0, 2),
       teamB: players.slice(2, 4),
       result: court.result,
-      ready: players.length === PLAYERS_PER_COURT,
+      startedAt: ready ? court.startedAt : undefined,
+      ready,
     };
   });
 }
@@ -462,8 +561,9 @@ function fairnessRank(
   gamesPlayed: number,
   outcome?: "win" | "loss",
 ): number {
-  const maxGames = players.reduce((m, p) => Math.max(m, p.gamesPlayed), 0);
-  const hasUnplayed = players.some((p) => p.gamesPlayed === 0);
+  const active = players.filter((p) => !p.done);
+  const maxGames = active.reduce((m, p) => Math.max(m, p.gamesPlayed), 0);
+  const hasUnplayed = active.some((p) => p.gamesPlayed === 0);
   // While some still unplayed: losers ahead of winners in line.
   // Once everyone has played: winners ahead (so winners meet winners next).
   // When some are a game up: losers ahead among those still behind.
@@ -521,7 +621,8 @@ export function restackQueue(
 
   // Just-finished always to the back (starting line again). Losers ahead of
   // winners in that returning block while others still haven't played.
-  const hasUnplayed = players.some((p) => p.gamesPlayed === 0);
+  const hasUnplayed = players.some((p) => !p.done && p.gamesPlayed === 0);
+
   const returning =
     winnerSide !== "A" && winnerSide !== "B"
       ? [...finishedIds]
@@ -570,7 +671,9 @@ export function rotateCourt(session: Session, courtId: number): Session {
   });
 
   const courts = session.courts.map((c) =>
-    c.id === courtId ? { ...c, playerIds: [], result: undefined } : c,
+    c.id === courtId
+      ? { ...c, playerIds: [], result: undefined, startedAt: undefined }
+      : c,
   );
 
   return fillCourts({
@@ -596,11 +699,12 @@ export function sessionStats(session: Session) {
   const elapsedMs = Date.now() - session.startedAt;
   const totalMs = session.hours * 60 * 60 * 1000;
   const remainingMs = Math.max(0, totalMs - elapsedMs);
-  const games = session.players.map((p) => p.gamesPlayed);
+  const active = session.players.filter((p) => !p.done);
+  const games = active.map((p) => p.gamesPlayed);
   const minGames = games.length ? Math.min(...games) : 0;
   const maxGames = games.length ? Math.max(...games) : 0;
   const playing = onCourtIds(session).size;
-  const waiting = session.queue.length;
+  const waiting = waitingPlayers(session).length
 
   return {
     roundsPlanned,
