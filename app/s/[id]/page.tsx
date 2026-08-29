@@ -64,7 +64,7 @@ export default function SessionPage() {
   }
 
   return (
-    <main className="relative z-10 mx-auto w-full max-w-lg flex-1 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-3xl sm:px-4 lg:max-w-5xl">
+    <main className="relative z-10 mx-auto w-full max-w-lg flex-1 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-3xl sm:px-4 lg:max-w-7xl">
       <SessionBoard
         session={session}
         onChange={setSession}

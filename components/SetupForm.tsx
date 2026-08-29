@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { ArrowLeft, Clock3, LayoutGrid, Type } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { PaddleStackMark } from "@/components/PaddleStackMark";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { capacityPerRound, estimatedRounds } from "@/lib/rotation";
+import { estimatedRounds } from "@/lib/rotation";
 import {
   DEFAULT_GAME_LENGTH_HOURS,
   DEFAULT_SESSION_TITLE,
@@ -35,11 +36,10 @@ function formatHours(n: number): string {
 
 export function SetupForm({ onStart, onBack }: Props) {
   const [title, setTitle] = useState(DEFAULT_SESSION_TITLE);
-  const [courtCount, setCourtCount] = useState(4);
+  const [courtCount, setCourtCount] = useState(3);
   const [hours, setHours] = useState(2);
 
   const rounds = estimatedRounds(hours, DEFAULT_GAME_LENGTH_HOURS);
-  const playing = capacityPerRound(courtCount);
   const canStart = courtCount >= 1 && hours > 0;
 
   return (
@@ -65,32 +65,34 @@ export function SetupForm({ onStart, onBack }: Props) {
             type="button"
             variant="ghost"
             size="sm"
-            className="h-10 w-fit -ml-2 text-muted-foreground"
+            className="h-10 w-fit -ml-2 text-[#f4f7f0]/60 hover:text-[#f4f7f0]"
             onClick={onBack}
           >
             <ArrowLeft data-icon="inline-start" />
             Sessions
           </Button>
         )}
-        <motion.p
-          className="font-display text-[clamp(2.5rem,12vw,4rem)] leading-[0.95] font-extrabold tracking-wide text-[var(--line)] uppercase"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05, duration: 0.4 }}
-        >
-          Paddle Stack
-        </motion.p>
+        <div className="flex items-center gap-3">
+          <PaddleStackMark className="h-10 w-10 shrink-0" />
+          <motion.p
+            className="font-display text-[1.65rem] leading-none tracking-wide text-[#e8f5a0] sm:text-3xl"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05, duration: 0.4 }}
+          >
+            Paddle Stack
+          </motion.p>
+        </div>
         <motion.h1
-          className="font-display max-w-[14ch] text-[clamp(1.5rem,6vw,2.25rem)] leading-[1.05] font-bold tracking-wide"
+          className="font-display text-xl tracking-wide text-[#f4f7f0] sm:text-2xl"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.12, duration: 0.4 }}
         >
           New session
         </motion.h1>
-        <p className="max-w-[34ch] text-[0.95rem] leading-snug text-muted-foreground">
-          Set courts and hours. You&apos;ll get a session ID saved on this
-          device.
+        <p className="max-w-[34ch] text-sm leading-snug text-[#f4f7f0]/65">
+          Set courts and hours. Each court keeps its own paddle stack.
         </p>
       </header>
 
@@ -178,7 +180,7 @@ export function SetupForm({ onStart, onBack }: Props) {
 
       <div className="rounded-md border-l-[3px] border-primary bg-muted/60 px-4 py-3 text-sm text-muted-foreground">
         <p>
-          ~{rounds} rounds · {playing} next up when stack is full
+          ~{rounds} rounds · each court rotates its own 4-player stack
         </p>
       </div>
 
@@ -190,7 +192,7 @@ export function SetupForm({ onStart, onBack }: Props) {
           type="submit"
           size="lg"
           disabled={!canStart}
-          className="font-display h-14 w-full text-lg tracking-wide uppercase shadow-[var(--shadow)]"
+          className="h-12 w-full rounded-xl bg-[#f5d76e] text-sm font-semibold text-[#122418] shadow-none"
         >
           Create session
         </Button>
@@ -211,7 +213,7 @@ function FieldCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground ring-0">
+    <Card className="rounded-xl border-[#e8f5a0]/25 bg-[#163828] text-[#f4f7f0] ring-0">
       <CardContent className="grid gap-2 pt-4">
         <Label
           htmlFor={htmlFor}

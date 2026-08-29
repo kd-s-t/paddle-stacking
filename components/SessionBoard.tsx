@@ -1,20 +1,44 @@
 "use client";
 
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  pointerWithin,
+  useDndContext,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { snapCenterToCursor } from "@dnd-kit/modifiers";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  ChevronDown,
+  ChevronUp,
+  ChevronsUp,
   Clock3,
   Layers3,
-  Pencil,
+  Pause,
   Play,
   RotateCcw,
   Sparkles,
-  Trophy,
   Undo2,
   UserPlus,
-  Users,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,34 +76,48 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { PaddleStackMark } from "@/components/PaddleStackMark";
+import { OnFireBurn } from "@/components/PaddleStackOnFire";
 import {
   addPlayers,
   canUndo,
-  capacityPerRound,
   decideAndRotate,
   donePlayers,
+  dropPlayerOnPlayer,
+  fillCourts,
   formatDuration,
+  lightestCourtId,
+  locatePlayer,
   markDonePlaying,
+  movePlayerToCourt,
   parseNames,
+  pauseCourt,
   playingMatches,
-  playingPlayers,
   populateStack,
   rejoinStack,
   removePlayer,
   renamePlayer,
+  reorderQueue,
+  restartToWaiting,
   resumeSession,
   rotateCourt,
   sessionStats,
+  skipThisGame,
   setMatchScore,
+  stackAnchorCourtId,
+  stackCourtIds,
+  stackIdForCourt,
   undoSession,
+  unpauseCourt,
   updateSessionDetails,
-  waitingPlayers,
+  waitingPlayersOnCourt,
   withUndo,
 } from "@/lib/rotation";
 import { cn } from "@/lib/utils";
 import {
   HOUR_OPTIONS,
   type Match,
+  type PlayedMatch,
   type Player,
   type Session,
 } from "@/lib/types";
@@ -97,9 +135,113 @@ function isLocalHost(): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
 }
 
+const PLAYER_DROP = "drop-player:";
+const COURT_DROP = "court:";
+
+const collisionDetection: CollisionDetection = (args) => {
+  const pointerHits = pointerWithin(args);
+  const overPlayer = pointerHits.filter((hit) =>
+    String(hit.id).startsWith(PLAYER_DROP),
+  );
+  if (overPlayer.length > 0) return overPlayer;
+  return pointerHits.filter((hit) => String(hit.id).startsWith(COURT_DROP));
+};
+
+const DragDisabledContext = createContext(false);
+
+function PlayerDnd({
+  disabled,
+  players,
+  onMoveToCourt,
+  onSwap,
+  children,
+}: {
+  disabled: boolean;
+  players: Player[];
+  onMoveToCourt: (playerId: string, courtId: number) => void;
+  onSwap: (aId: string, bId: string) => void;
+  children: ReactNode;
+}) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+  );
+  const byId = useMemo(
+    () => new Map(players.map((p) => [p.id, p])),
+    [players],
+  );
+  const activePlayer = activeId ? byId.get(activeId) : undefined;
+
+  function handleDragEnd(event: DragEndEvent) {
+    const fromId = String(event.active.id);
+    const overId = event.over ? String(event.over.id) : null;
+    setActiveId(null);
+    if (disabled || !overId) return;
+    if (overId.startsWith(PLAYER_DROP)) {
+      const toId = overId.slice(PLAYER_DROP.length);
+      if (toId && toId !== fromId) onSwap(fromId, toId);
+      return;
+    }
+    if (overId.startsWith(COURT_DROP)) {
+      const courtId = Number(overId.slice(COURT_DROP.length));
+      if (Number.isInteger(courtId)) onMoveToCourt(fromId, courtId);
+    }
+  }
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collisionDetection}
+      onDragStart={(event) => setActiveId(String(event.active.id))}
+      onDragEnd={handleDragEnd}
+      onDragCancel={() => setActiveId(null)}
+    >
+      <DragDisabledContext.Provider value={disabled}>
+        <div className={cn(activeId && "select-none")}>{children}</div>
+        <DragOverlay
+          dropAnimation={null}
+          modifiers={[snapCenterToCursor]}
+          zIndex={80}
+        >
+          {activePlayer ? <PlayerDragChip player={activePlayer} /> : null}
+        </DragOverlay>
+      </DragDisabledContext.Provider>
+    </DndContext>
+  );
+}
+
+function isOnFire(player: Player) {
+  return player.gamesPlayed >= 4 && player.losses === 0;
+}
+
+function hasEightWins(player: Player) {
+  return player.wins >= 8 && player.losses === 0;
+}
+
+function formatRecord(player: Pick<Player, "wins" | "losses">) {
+  return `W${player.wins}-L${player.losses}`;
+}
+
+function PlayerDragChip({ player }: { player: Player }) {
+  return (
+    <div className="flex min-h-12 min-w-[10rem] items-center gap-2 rounded-xl border border-[#e8f5a0]/50 bg-[#163828] px-3 py-2 shadow-[0_18px_50px_rgba(0,0,0,0.45)] ring-2 ring-[#f5d76e]">
+      <PlayerAvatar player={player} highlight />
+      <span className="truncate text-sm font-semibold text-[#f5d76e]">
+        {player.name}
+      </span>
+      <span className="shrink-0 text-xs tabular-nums text-[#f4f7f0]/55">
+        {formatRecord(player)}
+      </span>
+    </div>
+  );
+}
+
 export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
   const [, setTick] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
+  const [addCourtId, setAddCourtId] = useState(1);
   const [name, setName] = useState("");
   const [bulk, setBulk] = useState("");
   const [showBulk, setShowBulk] = useState(false);
@@ -111,19 +253,41 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
   const [editHours, setEditHours] = useState(session.hours);
   const [showPopulate, setShowPopulate] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
+  const [restartOpen, setRestartOpen] = useState(false);
+  const [tab, setTab] = useState<"board" | "history">("board");
   const ended = session.status === "ended";
   const stats = sessionStats(session);
-  const groupSize = capacityPerRound(session.courtCount);
-  const playing = playingPlayers(session);
   const matches = playingMatches(session);
-  const waiting = waitingPlayers(session);
   const done = donePlayers(session);
+  const history = [...(session.matchHistory ?? [])].reverse();
+  const renameLoc = pendingRename
+    ? locatePlayer(session, pendingRename.id)
+    : null;
+  const renameWaiting =
+    pendingRename != null && renameLoc?.where === "wait";
+  const renameIsFront =
+    renameWaiting &&
+    renameLoc != null &&
+    waitingPlayersOnCourt(session, renameLoc.courtId)[0]?.id ===
+      pendingRename.id;
 
   useEffect(() => {
     setShowPopulate(isLocalHost());
     const id = window.setInterval(() => setTick((t) => t + 1), 15_000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (session.status !== "active") return;
+    const next = fillCourts(session);
+    const before = session.courts
+      .map((c) => `${c.id}:${c.playerIds.join(",")}:${(c.queue ?? []).join(",")}`)
+      .join("|");
+    const after = next.courts
+      .map((c) => `${c.id}:${c.playerIds.join(",")}:${(c.queue ?? []).join(",")}`)
+      .join("|");
+    if (before !== after) onChange(next);
+  }, [session.id]);
 
   function formatStartedAt(ts: number): string {
     try {
@@ -134,6 +298,18 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
     } catch {
       return new Date(ts).toLocaleTimeString();
     }
+  }
+
+  function historyStartedAt(
+    match: PlayedMatch,
+    index: number,
+  ): number | undefined {
+    if (typeof match.startedAt === "number") return match.startedAt;
+    for (let i = index + 1; i < history.length; i++) {
+      const older = history[i];
+      if (older && older.court === match.court) return older.finishedAt;
+    }
+    return session.startedAt;
   }
 
   function commit(next: Session, recordUndo = false) {
@@ -149,7 +325,7 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
     e.preventDefault();
     const names = parseNames(name);
     if (names.length === 0) return;
-    commit(addPlayers(session, names), true);
+    commit(addPlayers(session, names, addCourtId), true);
     setName("");
     setAddOpen(false);
   }
@@ -158,7 +334,7 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
     e.preventDefault();
     const names = parseNames(bulk);
     if (names.length === 0) return;
-    commit(addPlayers(session, names), true);
+    commit(addPlayers(session, names, addCourtId), true);
     setBulk("");
     setShowBulk(false);
     setAddOpen(false);
@@ -220,83 +396,73 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
     >
-      <header className="grid gap-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-display truncate text-3xl leading-none font-extrabold tracking-wide text-[var(--line)] sm:text-4xl">
-              {session.title}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {session.id} · {session.courtCount} courts · {session.hours}h
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-wrap justify-end gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-10 text-muted-foreground"
-              disabled={ended || !canUndo(session)}
-              onClick={handleUndo}
-            >
-              <Undo2 className="size-4" />
-              Undo
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-10 text-muted-foreground"
+      <header className="grid gap-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 sm:gap-2">
+          <button
+            type="button"
+            className="inline-flex min-h-10 min-w-0 -ml-1 w-fit max-w-full items-center gap-1 rounded-lg px-1.5 text-sm text-[#f4f7f0]/60 hover:text-[#f4f7f0] sm:-ml-2 sm:px-2"
+            onClick={onLeave}
+          >
+            Home
+          </button>
+          <PaddleStackMark className="h-8 w-8 sm:h-10 sm:w-10" />
+          <button
+            type="button"
+            disabled={ended || !canUndo(session)}
+            onClick={handleUndo}
+            className="inline-flex min-h-10 w-fit items-center justify-self-end gap-1 rounded-lg px-1.5 text-sm text-[#f4f7f0]/60 hover:text-[#f4f7f0] disabled:opacity-40 sm:px-2"
+          >
+            <Undo2 className="size-4" />
+            <span className="hidden sm:inline">Undo</span>
+          </button>
+        </div>
+        <div className="min-w-0">
+          <p className="font-display truncate text-[1.65rem] leading-none tracking-wide text-[#e8f5a0] sm:text-3xl">
+            {session.title}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-2 text-sm text-[#f4f7f0]/65 sm:gap-x-3">
+            <button
+              type="button"
+              disabled={ended}
               onClick={openEdit}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[#e8f5a0]/25 px-2.5 text-sm font-semibold text-[#e8f5a0] hover:border-[#e8f5a0]/50 disabled:opacity-40"
             >
-              <Pencil className="size-4" />
-              Edit
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-10 text-muted-foreground"
-              onClick={onLeave}
-            >
-              Home
-            </Button>
-            {ended ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-10 text-primary"
+              Courts
+              <span className="font-display tabular-nums">
+                {session.courtCount}
+              </span>
+            </button>
+            <span>
+              · {session.players.length} stacked
+              {ended ? " · ended" : ""}
+            </span>
+            {!ended ? (
+              <span className="inline-flex items-center gap-1 text-[#e8f5a0]/80">
+                <Clock3 className="size-3.5" />
+                {formatDuration(stats.remainingMs)} left
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="text-sm font-semibold text-[#f5d76e]"
                 onClick={() => commit(resumeSession(session), true)}
               >
                 Resume
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary" className="gap-1 bg-muted text-foreground">
-            <Users className="size-3.5" />
-            {session.players.length} stacked
-          </Badge>
-          <Badge variant="secondary" className="gap-1 bg-muted text-foreground">
-            <Clock3 className="size-3.5" />
-            {formatDuration(stats.remainingMs)} left
-          </Badge>
-          {session.players.length > 0 && (
-            <Badge
-              variant="secondary"
-              className="gap-1 border-primary/30 bg-primary/15 text-primary"
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={ended}
+              onClick={() => {
+                setAddCourtId(lightestCourtId(session));
+                setAddOpen(true);
+              }}
+              className="ml-auto inline-flex min-h-9 items-center gap-1 rounded-xl bg-[#f5d76e] px-3 text-sm font-semibold text-[#122418] disabled:opacity-50"
             >
-              <Trophy className="size-3.5" />
-              {stats.minGames}-{stats.maxGames}g
-            </Badge>
-          )}
-          <Button
-            size="sm"
-            className="font-display ml-auto h-10 tracking-wide uppercase"
-            disabled={ended}
-            onClick={() => setAddOpen(true)}
-          >
-            <UserPlus data-icon="inline-start" />
-            Add
-          </Button>
+              <UserPlus className="size-4" />
+              Add
+            </button>
+          </div>
         </div>
       </header>
 
@@ -382,12 +548,56 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
               {showPopulate
-                ? "Drop a name on the stack, paste a list, or populate demos."
-                : "Drop a name on the stack."}
+                ? "Add to Court 1, or to the Courts 2–3 stack."
+                : "Add a paddle to Court 1 or the Courts 2–3 stack."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-3">
+            {session.courts.length > 1 ? (
+              <div className="grid gap-2">
+                <Label htmlFor="add-court" className="text-[var(--line)]">
+                  Court
+                </Label>
+                <Select
+                  value={addCourtId}
+                  onValueChange={(value) => {
+                    if (value != null) setAddCourtId(Number(value));
+                  }}
+                >
+                  <SelectTrigger
+                    id="add-court"
+                    className="h-12 w-full border-[var(--border)] bg-[var(--panel-raised)] text-base"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent
+                    align="start"
+                    className="max-h-72 border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)]"
+                  >
+                    {session.courts
+                      .filter(
+                        (court) =>
+                          stackAnchorCourtId(session, court.id) === court.id,
+                      )
+                      .map((court) => {
+                        const ids = stackCourtIds(session, court.id);
+                        return (
+                          <SelectItem
+                            key={court.id}
+                            value={court.id}
+                            className="focus:bg-[var(--accent)] focus:text-[var(--accent-foreground)]"
+                          >
+                            {ids.length > 1
+                              ? `Courts ${ids.join("–")}`
+                              : `Court ${court.id}`}
+                          </SelectItem>
+                        );
+                      })}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <form
               onSubmit={handleAddOne}
               className="grid grid-cols-[1fr_auto] gap-2"
@@ -454,7 +664,7 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
                     disabled={parseNames(bulk).length === 0}
                     className="font-display h-12 tracking-wide uppercase"
                   >
-                    Add {parseNames(bulk).length || ""} to stack
+                    Add {parseNames(bulk).length || ""} to court {addCourtId}
                   </Button>
                 </motion.form>
               )}
@@ -463,111 +673,295 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
         </DialogContent>
       </Dialog>
 
-      <Card className="border-[var(--border)] border-l-4 border-l-[var(--accent-hot)] bg-[var(--panel)] text-foreground shadow-none ring-0">
-        <CardHeader className="gap-1 px-4 pt-4 pb-2">
-          <CardTitle className="font-display flex items-center gap-2 text-xl tracking-wide text-[var(--line)] uppercase">
-            <Play className="size-5 fill-primary text-primary" />
-            Playing · {playing.length}
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Win: back to the starting line. Winners meet winners (swap partners).
-          </CardDescription>
-        </CardHeader>
-        <Separator className="bg-[var(--border)]" />
-        <CardContent className="grid gap-3 px-3 pt-3 pb-3">
-          {matches.every((m) => !m.ready) ? (
-            <p className="px-1 py-2 text-sm text-muted-foreground">
-              Nobody playing. Add paddles to the stack.
-            </p>
-          ) : (
-            matches.map((match) => (
-              <MatchCard
-                key={match.court}
-                match={match}
-                startedAtLabel={
-                  match.startedAt
-                    ? formatStartedAt(match.startedAt)
-                    : undefined
-                }
-                onRemove={setPendingRemove}
-                onRename={openRename}
-                onWinner={(winner) =>
-                  commit(decideAndRotate(session, match.court, winner), true)
-                }
-                onScore={(side, raw) =>
-                  commit(setMatchScore(session, match.court, side, raw))
-                }
-                onRotate={() =>
-                  commit(rotateCourt(session, match.court), true)
-                }
-              />
-            ))
+      <div
+        role="tablist"
+        aria-label="Session views"
+        className="grid grid-cols-2 gap-1 rounded-xl border border-[#e8f5a0]/20 bg-[#122418] p-1"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "board"}
+          onClick={() => setTab("board")}
+          className={cn(
+            "min-h-10 rounded-lg text-sm font-semibold transition",
+            tab === "board"
+              ? "bg-[#f5d76e] text-[#122418]"
+              : "text-[#f4f7f0]/60 hover:text-[#f4f7f0]",
           )}
-        </CardContent>
-      </Card>
+        >
+          Board
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "history"}
+          onClick={() => setTab("history")}
+          className={cn(
+            "min-h-10 rounded-lg text-sm font-semibold transition",
+            tab === "history"
+              ? "bg-[#f5d76e] text-[#122418]"
+              : "text-[#f4f7f0]/60 hover:text-[#f4f7f0]",
+          )}
+        >
+          Matches{history.length > 0 ? ` · ${history.length}` : ""}
+        </button>
+      </div>
 
-      <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground shadow-none ring-0">
-        <CardHeader className="gap-1 px-4 pt-4 pb-2">
-          <CardTitle className="font-display flex items-center gap-2 text-xl tracking-wide text-[var(--line)] uppercase">
-            <Layers3 className="size-5 text-primary" />
-            Waiting · {waiting.length}
-          </CardTitle>
-        </CardHeader>
-        <Separator className="bg-[var(--border)]" />
-        <CardContent className="px-3 pt-3 pb-3">
-          <PlayerList
-            players={waiting}
-            empty="No one waiting."
-            onRemove={setPendingRemove}
-            onRename={openRename}
-          />
-        </CardContent>
-      </Card>
+      {tab === "board" ? (
+        <>
+      {!ended && session.courts.length > 1 ? (
+        <p className="text-[11px] text-[#f4f7f0]/45">
+          Court 1 has its own stack. Courts 2 and 3 share one line — the next
+          four go to whichever of those courts is open.
+        </p>
+      ) : null}
+
+      <PlayerDnd
+        disabled={ended}
+        players={session.players}
+        onMoveToCourt={(playerId, courtId) =>
+          commit(movePlayerToCourt(session, playerId, courtId), true)
+        }
+        onSwap={(aId, bId) => commit(dropPlayerOnPlayer(session, aId, bId), true)}
+      >
+        <div className="grid grid-cols-1 items-stretch gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)]">
+          {matches
+            .filter((match) => stackIdForCourt(match.court) === 1)
+            .map((match) => {
+              const courtWaiting = waitingPlayersOnCourt(session, match.court);
+              return (
+                <DropCourtCard key={match.court} courtId={match.court}>
+                  <CardHeader className="gap-1 px-4 pt-4 pb-2">
+                    <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-wide text-[#e8f5a0]/70 uppercase">
+                      Court {match.court}
+                    </CardTitle>
+                    <CardDescription className="text-[#f4f7f0]/55">
+                      {match.ready ? "Playing" : "Need 4 to start"} ·{" "}
+                      {courtWaiting.length} waiting on this stack
+                    </CardDescription>
+                  </CardHeader>
+                  <Separator className="bg-[#e8f5a0]/15" />
+                  <CardContent className="grid gap-3 px-3 pt-3 pb-3">
+                    <MatchCard
+                      match={match}
+                      waitingCount={courtWaiting.length}
+                      disabled={ended || match.pausedAt != null}
+                      frozenNow={match.pausedAt}
+                      startedAtLabel={
+                        match.startedAt
+                          ? formatStartedAt(match.startedAt)
+                          : undefined
+                      }
+                      onPause={
+                        ended
+                          ? undefined
+                          : () =>
+                              commit(
+                                match.pausedAt != null
+                                  ? unpauseCourt(session, match.court)
+                                  : pauseCourt(session, match.court),
+                                true,
+                              )
+                      }
+                      onRemove={setPendingRemove}
+                      onRename={openRename}
+                      onWinner={(winner) =>
+                        commit(
+                          decideAndRotate(session, match.court, winner),
+                          true,
+                        )
+                      }
+                      onScore={(side, raw) =>
+                        commit(setMatchScore(session, match.court, side, raw))
+                      }
+                      onRotate={() =>
+                        commit(rotateCourt(session, match.court), true)
+                      }
+                    />
+                    <div className="grid gap-2">
+                      <p className="flex items-center gap-1.5 px-1 text-[11px] font-semibold tracking-wide text-[#e8f5a0]/70 uppercase">
+                        <Layers3 className="size-3.5" />
+                        This court · {courtWaiting.length}
+                      </p>
+                      {!ended && courtWaiting.length > 1 ? (
+                        <p className="px-1 text-[11px] text-[#f4f7f0]/45">
+                          Drag to reorder, or use the arrows.
+                        </p>
+                      ) : null}
+                      <PlayerList
+                        players={courtWaiting}
+                        empty="No one waiting on this court."
+                        compact
+                        canReorder={!ended}
+                        onMove={(player, to) =>
+                          commit(reorderQueue(session, player.id, to), true)
+                        }
+                        onRemove={setPendingRemove}
+                        onRename={openRename}
+                      />
+                    </div>
+                    {!ended ? (
+                      <CourtAddForm
+                        courtId={match.court}
+                        onAdd={(names, courtId) =>
+                          commit(addPlayers(session, names, courtId), true)
+                        }
+                      />
+                    ) : null}
+                  </CardContent>
+                </DropCourtCard>
+              );
+            })}
+          {(() => {
+            const rec = matches.filter((m) => stackIdForCourt(m.court) === 2);
+            if (rec.length === 0) return null;
+            const anchorId = stackAnchorCourtId(session, rec[0].court);
+            const courtWaiting = waitingPlayersOnCourt(session, anchorId);
+            const ids = stackCourtIds(session, rec[0].court);
+            const title =
+              ids.length > 1 ? `Courts ${ids.join("–")}` : `Court ${ids[0]}`;
+            const onCourt = rec.reduce(
+              (n, m) => n + m.teamA.length + m.teamB.length,
+              0,
+            );
+            return (
+              <DropCourtCard key={`stack-${anchorId}`} courtId={anchorId}>
+                <CardHeader className="gap-1 px-4 pt-4 pb-2">
+                  <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-wide text-[#e8f5a0]/70 uppercase">
+                    {title}
+                  </CardTitle>
+                  <CardDescription className="text-[#f4f7f0]/55">
+                    {onCourt > 0 ? `${onCourt} on court` : "Need 4 to start"} ·{" "}
+                    {courtWaiting.length} waiting
+                  </CardDescription>
+                </CardHeader>
+                <Separator className="bg-[#e8f5a0]/15" />
+                <CardContent className="grid gap-3 px-3 pt-3 pb-3">
+                  <div
+                    className={cn(
+                      "grid gap-3",
+                      rec.length > 1 && "sm:grid-cols-2",
+                    )}
+                  >
+                    {rec.map((match) => (
+                      <MatchCard
+                        key={match.court}
+                        match={match}
+                        waitingCount={courtWaiting.length}
+                        disabled={ended || match.pausedAt != null}
+                        frozenNow={match.pausedAt}
+                        startedAtLabel={
+                          match.startedAt
+                            ? formatStartedAt(match.startedAt)
+                            : undefined
+                        }
+                        onPause={
+                          ended
+                            ? undefined
+                            : () =>
+                                commit(
+                                  match.pausedAt != null
+                                    ? unpauseCourt(session, match.court)
+                                    : pauseCourt(session, match.court),
+                                  true,
+                                )
+                        }
+                        onRemove={setPendingRemove}
+                        onRename={openRename}
+                        onWinner={(winner) =>
+                          commit(
+                            decideAndRotate(session, match.court, winner),
+                            true,
+                          )
+                        }
+                        onScore={(side, raw) =>
+                          commit(setMatchScore(session, match.court, side, raw))
+                        }
+                        onRotate={() =>
+                          commit(rotateCourt(session, match.court), true)
+                        }
+                      />
+                    ))}
+                  </div>
+                  <div className="grid gap-2">
+                    <p className="flex items-center gap-1.5 px-1 text-[11px] font-semibold tracking-wide text-[#e8f5a0]/70 uppercase">
+                      <Layers3 className="size-3.5" />
+                      This stack · {courtWaiting.length}
+                    </p>
+                    {!ended && courtWaiting.length > 1 ? (
+                      <p className="px-1 text-[11px] text-[#f4f7f0]/45">
+                        Drag to reorder, or use the arrows.
+                      </p>
+                    ) : null}
+                    <PlayerList
+                      players={courtWaiting}
+                      empty="No one waiting on this stack."
+                      compact
+                      canReorder={!ended}
+                      onMove={(player, to) =>
+                        commit(reorderQueue(session, player.id, to), true)
+                      }
+                      onRemove={setPendingRemove}
+                      onRename={openRename}
+                    />
+                  </div>
+                  {!ended ? (
+                    <CourtAddForm
+                      courtId={anchorId}
+                      placeholder={`Add to courts ${ids.join("–")}`}
+                      onAdd={(names, courtId) =>
+                        commit(addPlayers(session, names, courtId), true)
+                      }
+                    />
+                  ) : null}
+                </CardContent>
+              </DropCourtCard>
+            );
+          })()}
+        </div>
+      </PlayerDnd>
 
       {done.length > 0 ? (
-        <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground shadow-none ring-0">
+        <Card className="rounded-xl border border-[#e8f5a0]/25 bg-[#163828] text-[#f4f7f0] shadow-none ring-0">
           <CardHeader className="gap-1 px-4 pt-4 pb-2">
-            <CardTitle className="font-display flex items-center gap-2 text-xl tracking-wide text-[var(--line)] uppercase">
+            <CardTitle className="text-xs font-semibold tracking-wide text-[#e8f5a0]/70 uppercase">
               Done · {done.length}
             </CardTitle>
           </CardHeader>
-          <Separator className="bg-[var(--border)]" />
+          <Separator className="bg-[#e8f5a0]/15" />
           <CardContent className="px-3 pt-3 pb-3">
             <ol className="grid max-h-[min(35vh,280px)] gap-1.5 overflow-auto overscroll-contain">
               {done.map((p) => (
                 <li
                   key={p.id}
-                  className="grid min-h-12 grid-cols-[2.25rem_1fr_auto_auto_auto] items-center gap-2 rounded-sm bg-[var(--panel-raised)] px-2 py-2 opacity-80"
+                  className="flex min-h-11 items-center gap-2 overflow-visible rounded-xl bg-[#1c4532] px-2.5 py-2 opacity-80 sm:min-h-12 sm:px-3"
                 >
-                  <span className="font-display font-bold text-primary tabular-nums">
-                    #{p.number ?? "?"}
-                  </span>
+                  <PlayerAvatar player={p} size="sm" />
                   <button
                     type="button"
-                    className="truncate text-left font-semibold"
+                    className="min-w-0 flex-1 truncate text-left text-sm font-medium text-[#f4f7f0]"
                     onClick={() => openRename(p)}
                   >
                     {p.name}
                   </button>
                   <span
-                    className="font-variant-numeric text-sm text-muted-foreground tabular-nums"
+                    className="shrink-0 text-xs tabular-nums text-[#f4f7f0]/55"
                     title={`${p.wins} wins · ${p.losses} losses · ${p.gamesPlayed} games`}
                   >
-                    {p.wins}-{p.losses}
+                    {formatRecord(p)}
                   </span>
-                  <Button
+                  <button
                     type="button"
-                    size="sm"
-                    variant="outline"
-                    className="font-display h-9 tracking-wide uppercase border-[var(--border)] bg-transparent"
+                    className="shrink-0 rounded-lg border border-[#e8f5a0]/30 px-2.5 py-1.5 text-xs font-semibold text-[#f4f7f0]"
                     onClick={() => commit(rejoinStack(session, p.id), true)}
                   >
                     Rejoin
-                  </Button>
+                  </button>
                   <button
                     type="button"
                     aria-label={`Remove ${p.name} forever`}
-                    className="flex size-10 items-center justify-center text-muted-foreground active:text-destructive"
+                    className="flex size-9 shrink-0 items-center justify-center text-[#f4f7f0]/45 hover:text-[#ff6b4a]"
                     onClick={() => setPendingRemove(p)}
                   >
                     <X className="size-4" />
@@ -580,15 +974,150 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
       ) : null}
 
       {!ended ? (
-        <Button
-          type="button"
-          variant="outline"
-          className="font-display h-12 w-full tracking-wide uppercase border-[var(--border)] bg-transparent text-foreground hover:bg-muted"
-          onClick={() => setEndOpen(true)}
-        >
-          End session
-        </Button>
+        <div className="grid gap-2">
+          <button
+            type="button"
+            className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-xl border border-[#e8f5a0]/30 text-sm font-semibold text-[#e8f5a0]"
+            onClick={() => setRestartOpen(true)}
+          >
+            <RotateCcw className="size-4" />
+            Restart · all waiting
+          </button>
+          <button
+            type="button"
+            className="min-h-12 w-full rounded-xl border border-[#f4f7f0]/20 text-sm font-semibold text-[#f4f7f0]/65"
+            onClick={() => setEndOpen(true)}
+          >
+            End session
+          </button>
+        </div>
       ) : null}
+        </>
+      ) : (
+        <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-[#e8f5a0]/70">
+            Matches · {history.length}
+          </h2>
+          {history.length === 0 ? (
+            <p className="mt-3 text-sm text-[#f4f7f0]/60">
+              Finished games show up here after you tap A wins or B wins.
+            </p>
+          ) : (
+            <ul className="mt-3 grid gap-2 md:grid-cols-2">
+              {history.map((m, i) => {
+                const score =
+                  m.scoreA != null || m.scoreB != null
+                    ? `${m.scoreA ?? "-"}-${m.scoreB ?? "-"}`
+                    : null;
+                const startedAt = historyStartedAt(m, i);
+                const finishedLabel = formatStartedAt(m.finishedAt);
+                const startedLabel =
+                  startedAt != null ? formatStartedAt(startedAt) : null;
+                const durationMs =
+                  startedAt != null && m.finishedAt >= startedAt
+                    ? m.finishedAt - startedAt
+                    : null;
+                return (
+                  <li
+                    key={m.id}
+                    className="rounded-xl border border-[#e8f5a0]/20 bg-[#163828] px-3 py-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[#e8f5a0]/70">
+                        Court {m.court} · Game {m.playSeq}
+                      </p>
+                      {score ? (
+                        <p className="font-display text-sm tabular-nums text-[#f5d76e]">
+                          {score}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[#f4f7f0]/50">
+                      {startedLabel ? (
+                        <span>
+                          {startedLabel} to {finishedLabel}
+                        </span>
+                      ) : (
+                        <span>Ended {finishedLabel}</span>
+                      )}
+                      {durationMs != null ? (
+                        <span className="inline-flex items-center gap-1 tabular-nums text-[#e8f5a0]/75">
+                          <Clock3 className="size-3" />
+                          {formatPlayClock(durationMs)}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
+                      <div
+                        className={cn(
+                          "min-w-0 text-right",
+                          m.winner === "A"
+                            ? "text-[#f5d76e]"
+                            : "text-[#f4f7f0]/75",
+                        )}
+                      >
+                        {m.teamA.map((p) => (
+                          <p key={p.id} className="break-words">
+                            #{p.number} {p.name}
+                          </p>
+                        ))}
+                      </div>
+                      <span className="font-display text-xs font-bold text-[#ff8a3d]">
+                        VS
+                      </span>
+                      <div
+                        className={cn(
+                          "min-w-0 text-left",
+                          m.winner === "B"
+                            ? "text-[#f5d76e]"
+                            : "text-[#f4f7f0]/75",
+                        )}
+                      >
+                        {m.teamB.map((p) => (
+                          <p key={p.id} className="break-words">
+                            #{p.number} {p.name}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="mt-2 text-center text-[11px] font-semibold uppercase tracking-wide text-[#e8f5a0]/55">
+                      {m.winner === "A" ? "A wins" : "B wins"}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+
+      <AlertDialog open={restartOpen} onOpenChange={setRestartOpen}>
+        <AlertDialogContent className="border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display tracking-wide uppercase">
+              Restart?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              Pull everyone off court and put them in the waiting line. W-L
+              stays. Hit Play on a court to send the next four out.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="border-[var(--border)] bg-transparent">
+            <AlertDialogCancel className="border-[var(--border)] bg-transparent text-foreground">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="font-display tracking-wide uppercase"
+              onClick={() => {
+                commit(restartToWaiting(session), true);
+                setRestartOpen(false);
+              }}
+            >
+              Restart
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={endOpen} onOpenChange={setEndOpen}>
         <AlertDialogContent className="border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)]">
@@ -633,8 +1162,8 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
                 </>
               ) : (
                 <>
-                  Mark {pendingRemove?.name} done for today? They leave the
-                  courts and waiting line, but keep their paddle # and W-L.
+                  Mark {pendingRemove?.name} done for today? They leave this
+                  court's stack, but keep their paddle # and W-L.
                 </>
               )}
             </AlertDialogDescription>
@@ -684,7 +1213,7 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
               Rename player
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              Update the name on the stack and courts.
+              Update the name on this court's stack.
             </DialogDescription>
           </DialogHeader>
           <form className="grid gap-3" onSubmit={saveRename}>
@@ -706,11 +1235,125 @@ export function SessionBoard({ session, onChange, onLeave, onEnd }: Props) {
             >
               Save name
             </Button>
+            {pendingRename && !pendingRename.done && !ended ? (
+              <>
+                {renameWaiting ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="lg"
+                      className="font-display h-12 tracking-wide uppercase"
+                      disabled={renameIsFront}
+                      onClick={() => {
+                        if (!pendingRename) return;
+                        commit(
+                          reorderQueue(session, pendingRename.id, "front"),
+                          true,
+                        );
+                        setPendingRename(null);
+                      }}
+                    >
+                      <ChevronsUp className="size-4" />
+                      Play next
+                    </Button>
+                    <p className="-mt-1 text-center text-xs text-muted-foreground">
+                      Move to the front of this stack’s waiting line.
+                    </p>
+                  </>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  className="font-display h-12 tracking-wide uppercase"
+                  onClick={() => {
+                    commit(skipThisGame(session, pendingRename.id), true);
+                    setPendingRename(null);
+                  }}
+                >
+                  Skip this game
+                </Button>
+                <p className="-mt-1 text-center text-xs text-muted-foreground">
+                  Sit out this round. They go to the end of the waiting line.
+                </p>
+              </>
+            ) : null}
           </form>
         </DialogContent>
       </Dialog>
 
     </motion.div>
+  );
+}
+
+function DropCourtCard({
+  courtId,
+  children,
+}: {
+  courtId: number;
+  children: ReactNode;
+}) {
+  const dragDisabled = useContext(DragDisabledContext);
+  const { setNodeRef, isOver } = useDroppable({
+    id: `${COURT_DROP}${courtId}`,
+    disabled: dragDisabled,
+    data: { type: "court", courtId },
+  });
+
+  return (
+    <div ref={setNodeRef} className="flex h-full min-w-0 flex-col">
+      <Card
+        className={cn(
+          "flex h-full flex-col overflow-visible rounded-xl border border-[#e8f5a0]/25 bg-[#163828] text-[#f4f7f0] shadow-none ring-0 transition",
+          isOver && "border-[#e8f5a0]/60 ring-2 ring-[#e8f5a0]/70 bg-[#1c4532]",
+        )}
+      >
+        {children}
+      </Card>
+    </div>
+  );
+}
+
+function CourtAddForm({
+  courtId,
+  placeholder,
+  onAdd,
+}: {
+  courtId: number;
+  placeholder?: string;
+  onAdd: (names: string[], courtId: number) => void;
+}) {
+  const [name, setName] = useState("");
+
+  return (
+    <form
+      className="grid grid-cols-[1fr_auto] gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const names = parseNames(name);
+        if (names.length === 0) return;
+        onAdd(names, courtId);
+        setName("");
+      }}
+    >
+      <Input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={placeholder ?? `Add to court ${courtId}`}
+        enterKeyHint="done"
+        autoComplete="off"
+        autoCorrect="off"
+        className="min-h-12 min-w-0 rounded-xl border border-[#e8f5a0]/30 bg-[#1c4532] px-3 text-sm text-[#f4f7f0] outline-none placeholder:text-[#f4f7f0]/40 focus:border-[#f5d76e]"
+      />
+      <Button
+        type="submit"
+        disabled={!name.trim()}
+        className="inline-flex min-h-12 shrink-0 items-center rounded-xl bg-[#f5d76e] px-3 text-sm font-semibold text-[#122418] disabled:opacity-50"
+      >
+        Add
+      </Button>
+    </form>
   );
 }
 
@@ -727,7 +1370,11 @@ function formatPlayClock(ms: number): string {
 
 function MatchCard({
   match,
+  waitingCount = 0,
   startedAtLabel,
+  disabled = false,
+  frozenNow,
+  onPause,
   onRemove,
   onRename,
   onWinner,
@@ -735,7 +1382,11 @@ function MatchCard({
   onRotate,
 }: {
   match: Match;
+  waitingCount?: number;
   startedAtLabel?: string;
+  disabled?: boolean;
+  frozenNow?: number;
+  onPause?: () => void;
   onRemove: (player: Player) => void;
   onRename: (player: Player) => void;
   onWinner: (winner: "A" | "B") => void;
@@ -752,10 +1403,10 @@ function MatchCard({
   const lineupKey = [...match.teamA, ...match.teamB].map((p) => p.id).join("|");
 
   useEffect(() => {
-    if (!match.startedAt || !match.ready) return;
+    if (!match.startedAt || !match.ready || frozenNow != null) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [match.startedAt, match.ready]);
+  }, [match.startedAt, match.ready, frozenNow]);
 
   useEffect(() => {
     setResolving(null);
@@ -769,13 +1420,16 @@ function MatchCard({
     };
   }, []);
 
+  const clockNow = frozenNow ?? now;
   const playMs =
-    match.startedAt && match.ready ? Math.max(0, now - match.startedAt) : 0;
+    match.startedAt && match.ready ? Math.max(0, clockNow - match.startedAt) : 0;
   const winner = resolving ?? match.result?.winner;
-  const busy = resolving != null;
+  const { active } = useDndContext();
+  const busy = disabled || resolving != null || active != null;
+  const canDecide = match.ready && !busy;
 
   function handleWinner(side: "A" | "B") {
-    if (busy) return;
+    if (!canDecide) return;
     setResolving(side);
     if (resolveTimer.current != null) {
       window.clearTimeout(resolveTimer.current);
@@ -786,23 +1440,15 @@ function MatchCard({
     }, 520);
   }
 
-  if (!match.ready) {
-    return (
-      <div className="rounded-sm border border-dashed border-[var(--border)] px-3 py-4">
-        <p className="font-display text-sm tracking-wide text-primary uppercase">
-          Court {match.court}
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Waiting for 4 players…
-        </p>
-      </div>
-    );
-  }
-
   return (
     <motion.div
       layout
-      className="relative overflow-hidden rounded-sm bg-[var(--panel-raised)] outline outline-primary/25 px-3 py-3"
+      className={cn(
+        "relative min-w-0 overflow-visible rounded-xl border bg-[#163828] px-2.5 py-3 sm:px-4 sm:py-4",
+        match.pausedAt != null
+          ? "border-[#f5d76e]/55"
+          : "border-[#e8f5a0]/25",
+      )}
       animate={
         resolving
           ? {
@@ -819,21 +1465,50 @@ function MatchCard({
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-display text-sm tracking-wide text-primary uppercase">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#f5d76e]">
             Court {match.court}
+            {match.pausedAt != null ? " · paused" : ""}
           </p>
           {startedAtLabel ? (
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            <p className="mt-0.5 text-[11px] text-[#f4f7f0]/50">
               Started at {startedAtLabel}
+            </p>
+          ) : !match.ready ? (
+            <p className="mt-0.5 text-[11px] text-[#f4f7f0]/50">
+              Drop players here · need {Math.max(0, 4 - match.teamA.length - match.teamB.length)} more
             </p>
           ) : null}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {match.startedAt ? (
-            <Badge className="gap-1 border-primary/40 bg-primary/20 font-display text-sm tabular-nums text-primary">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#f5d76e]/35 bg-[#f5d76e]/15 px-1.5 py-1 font-display text-xs tabular-nums text-[#f5d76e] sm:px-2 sm:text-sm">
               <Clock3 className="size-3.5" />
               {formatPlayClock(playMs)}
-            </Badge>
+            </span>
+          ) : null}
+          {onPause ? (
+            <button
+              type="button"
+              onClick={onPause}
+              className={cn(
+                "inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold",
+                match.pausedAt != null
+                  ? "bg-[#f5d76e] text-[#122418]"
+                  : "border border-[#e8f5a0]/40 text-[#e8f5a0] hover:border-[#e8f5a0]/70",
+              )}
+            >
+              {match.pausedAt != null ? (
+                <>
+                  <Play className="size-3.5" />
+                  Play
+                </>
+              ) : (
+                <>
+                  <Pause className="size-3.5" />
+                  Pause
+                </>
+              )}
+            </button>
           ) : null}
           {hasScore && (
             <Badge className="border-primary/40 bg-primary/20 text-primary">
@@ -850,7 +1525,7 @@ function MatchCard({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -24, scale: 0.97 }}
           transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-          className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
+          className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 sm:gap-2"
         >
           <TeamSide
             players={match.teamA}
@@ -863,7 +1538,7 @@ function MatchCard({
             celebrate={resolving === "A"}
           />
           <motion.span
-            className="font-display text-lg font-extrabold tracking-wide text-[var(--accent-hot)]"
+            className="font-display text-base font-bold text-[#ff8a3d]"
             animate={
               resolving
                 ? { scale: [1, 1.2, 1], rotate: [0, -6, 6, 0] }
@@ -894,9 +1569,10 @@ function MatchCard({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.2 }}
-            className="font-display mt-2 text-center text-sm tracking-wide text-primary uppercase"
+            className="mt-2 text-center text-xs font-semibold uppercase tracking-wide text-[#f5d76e]"
           >
-            {resolving === "A" ? "Left wins" : "Right wins"}. Next group up.
+            {resolving === "A" ? "A wins" : "B wins"}
+            {waitingCount > 0 ? ". Next group up." : "."}
           </motion.p>
         ) : null}
       </AnimatePresence>
@@ -904,14 +1580,14 @@ function MatchCard({
       {!showScore ? (
         <button
           type="button"
-          className="mt-2 w-full py-1.5 text-center text-xs text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+          className="mt-3 w-full py-1.5 text-center text-xs text-[#f4f7f0]/55 underline-offset-2 hover:text-[#f5d76e] hover:underline disabled:opacity-40"
           onClick={() => setShowScore(true)}
-          disabled={busy}
+          disabled={busy || !match.ready}
         >
           Add score (optional)
         </button>
       ) : (
-        <div className="mt-3 rounded-sm border border-dashed border-[var(--border)] px-3 py-2.5">
+        <div className="mt-3 rounded-xl border border-dashed border-[#e8f5a0]/30 px-3 py-2.5">
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">Score · optional</p>
             {!hasScore && (
@@ -957,47 +1633,97 @@ function MatchCard({
       )}
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <motion.div whileTap={busy ? undefined : { scale: 0.96 }}>
-          <Button
-            type="button"
-            size="sm"
-            className={cn(
-              "font-display h-11 w-full tracking-wide uppercase",
-              resolving === "A" && "ring-2 ring-primary",
-            )}
-            disabled={busy || match.teamA.length === 0}
-            onClick={() => handleWinner("A")}
-          >
-            Left wins
-          </Button>
-        </motion.div>
-        <motion.div whileTap={busy ? undefined : { scale: 0.96 }}>
-          <Button
-            type="button"
-            size="sm"
-            className={cn(
-              "font-display h-11 w-full tracking-wide uppercase",
-              resolving === "B" && "ring-2 ring-primary",
-            )}
-            disabled={busy || match.teamB.length === 0}
-            onClick={() => handleWinner("B")}
-          >
-            Right wins
-          </Button>
-        </motion.div>
+        <motion.button
+          type="button"
+          disabled={!canDecide || match.teamA.length === 0}
+          whileTap={!canDecide ? undefined : { scale: 0.96 }}
+          onClick={() => handleWinner("A")}
+          className={cn(
+            "min-h-12 rounded-xl bg-[#f5d76e] px-3 text-sm font-semibold text-[#122418] touch-manipulation disabled:opacity-50",
+            resolving === "A" && "ring-2 ring-[#e8f5a0]",
+          )}
+        >
+          A wins
+        </motion.button>
+        <motion.button
+          type="button"
+          disabled={!canDecide || match.teamB.length === 0}
+          whileTap={!canDecide ? undefined : { scale: 0.96 }}
+          onClick={() => handleWinner("B")}
+          className={cn(
+            "min-h-12 rounded-xl bg-[#f5d76e] px-3 text-sm font-semibold text-[#122418] touch-manipulation disabled:opacity-50",
+            resolving === "B" && "ring-2 ring-[#e8f5a0]",
+          )}
+        >
+          B wins
+        </motion.button>
       </div>
 
-      <Button
+      <button
         type="button"
-        variant="outline"
-        className="font-display mt-2 h-11 w-full tracking-wide uppercase border-[var(--border)] bg-transparent text-foreground hover:bg-muted"
-        disabled={busy}
+        className="mt-2 min-h-11 w-full rounded-xl border border-[#e8f5a0]/30 text-sm font-semibold text-[#f4f7f0] disabled:opacity-50"
+        disabled={!canDecide}
         onClick={onRotate}
       >
-        <RotateCcw data-icon="inline-start" />
         Rotate court (no winner)
-      </Button>
+      </button>
     </motion.div>
+  );
+}
+
+function PlayerAvatar({
+  player,
+  number,
+  size = "md",
+  highlight = false,
+  className,
+}: {
+  player?: Player;
+  number?: number;
+  size?: "sm" | "md";
+  highlight?: boolean;
+  className?: string;
+}) {
+  const paddle = number ?? player?.number ?? 0;
+  const onFire = player ? isOnFire(player) : false;
+  const eightWins = player ? hasEightWins(player) : false;
+  const burning = onFire || eightWins;
+  const dim =
+    size === "sm"
+      ? "size-7 text-[11px] sm:size-8 sm:text-xs"
+      : "size-8 text-xs sm:size-10 sm:text-sm";
+
+  return (
+    <span
+      className={cn("relative inline-flex shrink-0 overflow-visible", className)}
+      title={
+        eightWins
+          ? "On fire — 8+ wins"
+          : onFire
+            ? "On fire — undefeated after 4+ games"
+            : undefined
+      }
+    >
+      {burning ? (
+        <OnFireBurn size={size} tone={eightWins ? "blue" : "orange"} />
+      ) : null}
+      <span
+        aria-hidden
+        className={cn(
+          "relative z-[1] inline-flex items-center justify-center rounded-full font-display font-bold tabular-nums ring-2",
+          dim,
+          eightWins
+            ? "bg-gradient-to-b from-[#7ec8ff] to-[#2f6fed] text-[#071428] ring-[#5aa8ff]/95"
+            : onFire
+              ? "bg-gradient-to-b from-[#ffb347] to-[#ff6a1a] text-[#1a0c04] ring-[#ff8a3d]/90"
+              : highlight
+                ? "bg-[#f5d76e] text-[#122418] ring-[#e8f5a0]/80"
+                : "bg-[#1c4532] text-[#f5d76e] ring-[#e8f5a0]/35",
+        )}
+      >
+        {paddle}
+      </span>
+    </span>
   );
 }
 
@@ -1016,21 +1742,10 @@ function TeamSide({
   outcome?: "win" | "lose";
   celebrate?: boolean;
 }) {
-  if (players.length === 0) {
-    return (
-      <p
-        className={cn(
-          "text-sm text-muted-foreground",
-          align === "end" ? "text-right" : "text-left",
-        )}
-      >
-        Waiting…
-      </p>
-    );
-  }
+  const slots: (Player | null)[] = [players[0] ?? null, players[1] ?? null];
 
   return (
-    <div className={cn("grid gap-1.5", align === "end" && "justify-items-end")}>
+    <div className={cn("grid min-w-0 w-full gap-1.5", align === "end" && "justify-items-stretch")}>
       <AnimatePresence>
         {outcome ? (
           <motion.div
@@ -1053,122 +1768,294 @@ function TeamSide({
           </motion.div>
         ) : null}
       </AnimatePresence>
-      <ul className={cn("grid gap-1.5", align === "end" && "justify-items-end")}>
-        {players.map((p, i) => (
-          <motion.li
-            key={p.id}
-            layout
-            initial={false}
-            animate={
-              celebrate
-                ? {
-                    scale: [1, 1.06, 1],
-                    y: [0, -3, 0],
-                    outlineColor: [
-                      "transparent",
-                      "color-mix(in oklab, var(--primary) 70%, transparent)",
-                      "color-mix(in oklab, var(--primary) 50%, transparent)",
-                    ],
-                  }
-                : outcome === "lose"
-                  ? { opacity: 0.65, scale: 0.98 }
-                  : { opacity: 1, scale: 1 }
-            }
-            transition={{
-              duration: 0.35,
-              delay: celebrate ? i * 0.05 : 0,
-              ease: "easeOut",
-            }}
-            className={cn(
-              "flex min-h-10 items-center gap-1 rounded-sm bg-[var(--panel)] px-2 py-1.5 outline outline-transparent",
-              align === "end" && "flex-row-reverse",
-              outcome === "win" && "outline-primary/50",
-            )}
-          >
-            <span className="font-display shrink-0 text-xs font-bold text-primary tabular-nums">
-              #{p.number ?? "?"}
-            </span>
-            <button
-              type="button"
-              className="truncate text-left font-semibold"
-              onClick={() => onRename(p)}
+      <ul className="grid w-full min-w-0 gap-1.5">
+        {slots.map((p, i) =>
+          p ? (
+            <DraggablePlayer
+              key={p.id}
+              player={p}
+              align={align}
+              outcome={outcome}
+              celebrate={celebrate}
+              delay={celebrate ? i * 0.05 : 0}
+              onRemove={onRemove}
+              onRename={onRename}
+            />
+          ) : (
+            <li
+              key={`open-${align}-${i}`}
+              className={cn(
+                "flex min-h-10 min-w-[6.5rem] items-center gap-1 rounded-xl border border-dashed border-[#e8f5a0]/30 px-0.5 py-1 sm:min-h-11 sm:gap-2 sm:px-1.5",
+                align === "end" && "flex-row-reverse",
+              )}
             >
-              {p.name}
-            </button>
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {p.wins}-{p.losses}
-            </span>
-            <button
-              type="button"
-              aria-label={`Done playing: ${p.name}`}
-              className="flex size-8 shrink-0 items-center justify-center text-muted-foreground active:text-destructive"
-              onClick={() => onRemove(p)}
-            >
-              <X className="size-3.5" />
-            </button>
-          </motion.li>
-        ))}
+              <span
+                aria-hidden
+                className="inline-flex size-8 shrink-0 rounded-full border border-dashed border-[#e8f5a0]/35 sm:size-10"
+              />
+              <span className="text-xs text-[#f4f7f0]/40">Open</span>
+            </li>
+          ),
+        )}
       </ul>
     </div>
+  );
+}
+
+function DraggablePlayer({
+  player,
+  align,
+  outcome,
+  celebrate,
+  delay,
+  compact,
+  queueIndex,
+  queueLength,
+  onMove,
+  onRemove,
+  onRename,
+}: {
+  player: Player;
+  align?: "start" | "end";
+  outcome?: "win" | "lose";
+  celebrate?: boolean;
+  delay?: number;
+  compact?: boolean;
+  queueIndex?: number;
+  queueLength?: number;
+  onMove?: (player: Player, to: "up" | "down") => void;
+  onRemove: (player: Player) => void;
+  onRename: (player: Player) => void;
+}) {
+  const dragDisabled = useContext(DragDisabledContext);
+  const { active } = useDndContext();
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    isDragging,
+  } = useDraggable({
+    id: player.id,
+    disabled: dragDisabled,
+    data: { type: "player", playerId: player.id },
+  });
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `${PLAYER_DROP}${player.id}`,
+    disabled: dragDisabled || isDragging,
+    data: { type: "player", playerId: player.id },
+  });
+
+  function setNodeRef(node: HTMLElement | null) {
+    setDragRef(node);
+    setDropRef(node);
+  }
+
+  return (
+    <li
+      ref={setNodeRef}
+      className={cn(
+        "w-full min-w-0 touch-none list-none",
+        dragDisabled ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+      )}
+      {...listeners}
+      {...attributes}
+    >
+      <motion.div
+        layout={!isDragging}
+        initial={false}
+        animate={
+          isDragging
+            ? { opacity: 0.35, scale: 0.98 }
+            : celebrate
+              ? { scale: [1, 1.06, 1], y: [0, -3, 0], opacity: 1 }
+              : outcome === "lose"
+                ? { opacity: 0.65, scale: 0.98 }
+                : { opacity: 1, scale: 1 }
+        }
+        transition={{
+          duration: 0.35,
+          delay: delay ?? 0,
+          ease: "easeOut",
+        }}
+        className={cn(
+          "flex w-full min-w-0 items-center overflow-visible rounded-xl",
+          compact
+            ? "min-h-11 gap-2 bg-[#1c4532] px-2.5 py-2 sm:min-h-12 sm:gap-2.5 sm:px-3 sm:py-2.5"
+            : "min-h-10 items-start gap-1 px-0 py-1 sm:min-h-11 sm:gap-1.5 sm:px-1",
+          align === "end" && "flex-row-reverse",
+          outcome === "win" && "ring-2 ring-[#e8f5a0]/60",
+          outcome === "lose" && "opacity-45",
+          isOver && !isDragging && "bg-[#e8f5a0]/15 ring-2 ring-[#e8f5a0]/60",
+        )}
+      >
+        <PlayerAvatar
+          player={player}
+          size={compact ? "sm" : "md"}
+          highlight={Boolean(celebrate || isDragging)}
+        />
+        {compact ? (
+          <>
+            <button
+              type="button"
+              className={cn(
+                "min-w-0 flex-1 text-left text-sm font-medium break-words",
+                celebrate || isDragging
+                  ? "text-[#f5d76e]"
+                  : hasEightWins(player)
+                    ? "text-[#7ec8ff]"
+                    : isOnFire(player)
+                      ? "text-[#ffb347]"
+                      : "text-[#f4f7f0]",
+              )}
+              onClick={() => {
+                if (active) return;
+                onRename(player);
+              }}
+            >
+              {player.name}
+            </button>
+            <span
+              className={cn(
+                "shrink-0 text-[10px] tabular-nums sm:text-xs",
+                hasEightWins(player) ? "text-[#7ec8ff]" : "text-[#f4f7f0]/55",
+              )}
+            >
+              {formatRecord(player)}
+            </span>
+            {onMove && queueLength != null && queueLength > 1 ? (
+              <div className="flex shrink-0 flex-col">
+                <button
+                  type="button"
+                  aria-label={`Move ${player.name} up the line`}
+                  disabled={queueIndex === 0}
+                  className="flex size-6 items-center justify-center text-[#e8f5a0]/80 hover:text-[#f5d76e] disabled:opacity-25"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => onMove(player, "up")}
+                >
+                  <ChevronUp className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move ${player.name} down the line`}
+                  disabled={queueIndex === queueLength - 1}
+                  className="flex size-6 items-center justify-center text-[#e8f5a0]/80 hover:text-[#f5d76e] disabled:opacity-25"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => onMove(player, "down")}
+                >
+                  <ChevronDown className="size-3.5" />
+                </button>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              aria-label={`Done playing: ${player.name}`}
+              className="flex size-8 shrink-0 items-center justify-center text-[#f4f7f0]/45 hover:text-[#ff6b4a] sm:size-9"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => onRemove(player)}
+            >
+              <X className="size-4" />
+            </button>
+          </>
+        ) : (
+          <div
+            className={cn(
+              "min-w-0 flex-1",
+              align === "end" ? "text-right" : "text-left",
+            )}
+          >
+            <button
+              type="button"
+              className={cn(
+                "w-full text-xs font-medium leading-tight break-words sm:text-sm",
+                celebrate || isDragging
+                  ? "text-[#f5d76e]"
+                  : hasEightWins(player)
+                    ? "text-[#7ec8ff]"
+                    : isOnFire(player)
+                      ? "text-[#ffb347]"
+                      : "text-[#f4f7f0]",
+                align === "end" ? "text-right" : "text-left",
+              )}
+              onClick={() => {
+                if (active) return;
+                onRename(player);
+              }}
+            >
+              {player.name}
+            </button>
+            <div
+              className={cn(
+                "mt-0.5 flex items-center gap-1",
+                align === "end" && "flex-row-reverse",
+              )}
+            >
+              <span
+                className={cn(
+                  "shrink-0 text-[10px] tabular-nums sm:text-xs",
+                  hasEightWins(player) ? "text-[#7ec8ff]" : "text-[#f4f7f0]/55",
+                )}
+              >
+                {formatRecord(player)}
+              </span>
+              <button
+                type="button"
+                aria-label={`Done playing: ${player.name}`}
+                className="flex size-6 shrink-0 items-center justify-center text-[#f4f7f0]/45 hover:text-[#ff6b4a] sm:size-7"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => onRemove(player)}
+              >
+                <X className="size-3 sm:size-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </li>
   );
 }
 
 function PlayerList({
   players,
   empty,
+  compact,
+  canReorder,
+  onMove,
   onRemove,
   onRename,
 }: {
   players: Player[];
   empty: string;
+  compact?: boolean;
+  canReorder?: boolean;
+  onMove?: (player: Player, to: "up" | "down") => void;
   onRemove: (player: Player) => void;
   onRename: (player: Player) => void;
 }) {
   return (
-    <ol className="grid max-h-[min(45vh,420px)] gap-1.5 overflow-auto overscroll-contain">
+    <ol
+      className={cn(
+        "grid gap-1.5 overflow-auto overscroll-contain",
+        compact
+          ? "max-h-[min(28vh,220px)]"
+          : "max-h-[min(45vh,420px)]",
+      )}
+    >
       <AnimatePresence initial={false}>
-        {players.map((p) => (
-          <motion.li
+        {players.map((p, index) => (
+          <DraggablePlayer
             key={p.id}
-            layout
-            initial={{ opacity: 0, x: 16, scale: 0.98 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: -12, scale: 0.96 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            className="grid min-h-12 grid-cols-[2.25rem_1fr_auto_auto] items-center gap-2 rounded-sm bg-[var(--panel-raised)] px-2 py-2"
-          >
-            <span
-              className="font-display font-bold text-primary tabular-nums"
-              title="Paddle number (permanent for this session)"
-            >
-              #{p.number ?? "?"}
-            </span>
-            <button
-              type="button"
-              className="truncate text-left font-semibold"
-              onClick={() => onRename(p)}
-            >
-              {p.name}
-            </button>
-            <span
-              className="font-variant-numeric text-sm text-muted-foreground tabular-nums"
-              title={`${p.wins} wins · ${p.losses} losses · ${p.gamesPlayed} games`}
-            >
-              {p.wins}-{p.losses}
-            </span>
-            <button
-              type="button"
-              aria-label={`Done playing: ${p.name}`}
-              className="flex size-10 items-center justify-center text-muted-foreground active:text-destructive"
-              onClick={() => onRemove(p)}
-            >
-              <X className="size-4" />
-            </button>
-          </motion.li>
+            player={p}
+            compact={compact}
+            queueIndex={index}
+            queueLength={players.length}
+            onMove={canReorder ? onMove : undefined}
+            onRemove={onRemove}
+            onRename={onRename}
+          />
         ))}
       </AnimatePresence>
       {players.length === 0 && (
-        <li className="px-1 py-2 text-sm text-muted-foreground">{empty}</li>
+        <li className="px-1 py-2 text-sm text-[#f4f7f0]/55">{empty}</li>
       )}
     </ol>
   );

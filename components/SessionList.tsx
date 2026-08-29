@@ -1,7 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Clock3, Layers3, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLayoutEffect, useState } from "react";
 import {
@@ -14,15 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PaddleStackMark } from "@/components/PaddleStackMark";
 import { WelcomeOverlay } from "@/components/WelcomeOverlay";
 import { deleteSession, listSessions } from "@/lib/db";
 import { formatDuration } from "@/lib/rotation";
@@ -84,32 +77,51 @@ export function SessionList() {
       transition={{ duration: 0.4, ease: "easeOut" }}
     >
       <header className="grid gap-2 pt-2">
-        <p className="font-display text-[clamp(2.5rem,12vw,4rem)] leading-[0.95] font-extrabold tracking-wide text-[var(--line)] uppercase">
-          Paddle Stack
-        </p>
-        <h1 className="font-display text-[clamp(1.5rem,6vw,2.25rem)] leading-[1.05] font-bold tracking-wide">
+        <div className="flex items-center gap-3">
+          <PaddleStackMark className="h-10 w-10 shrink-0" />
+          <p className="font-display text-[1.65rem] leading-none tracking-wide text-[#e8f5a0] sm:text-3xl">
+            Paddle Stack
+          </p>
+        </div>
+        <h1 className="font-display text-xl tracking-wide text-[#f4f7f0] sm:text-2xl">
           Your sessions
         </h1>
-        <p className="max-w-[36ch] text-[0.95rem] leading-snug text-muted-foreground">
-          Saved on this device. Open a session ID or create a new stack.
+        <p className="max-w-[36ch] text-sm leading-snug text-[#f4f7f0]/65">
+          Saved on this device. Open a session or start a new stack.
         </p>
       </header>
 
-      <Button
-        size="lg"
-        className="font-display h-14 w-full text-lg tracking-wide uppercase shadow-[var(--shadow)]"
-        onClick={() => router.push("/new")}
-      >
-        <Plus data-icon="inline-start" />
-        New session
-      </Button>
+      <aside>
+        <Link
+          href="/new"
+          className="group relative flex items-center gap-3 overflow-hidden rounded-2xl border border-[#e8f5a0]/25 bg-[#0f2e1c] px-3 py-3 pr-12 transition hover:border-[#e8f5a0]/45 hover:bg-[#163828] sm:px-5 sm:py-4 sm:pr-16"
+        >
+          <span
+            aria-hidden
+            className="shiny-gold-sheen pointer-events-none absolute inset-y-0 left-0 z-0 w-1/3 bg-gradient-to-r from-transparent via-[#e8f5a0]/25 to-transparent"
+          />
+          <PaddleStackMark className="relative z-[1] mt-0.5 h-10 w-10 shrink-0 self-start" />
+          <span className="relative z-[1] min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-[#f5d76e] underline-offset-2 group-hover:underline">
+              New session
+            </span>
+            <span className="mt-1 block text-sm text-[#f4f7f0]/65">
+              Running open play with a group? Fair rotations — each court keeps
+              its own stack.
+            </span>
+          </span>
+          <ChevronRight
+            aria-hidden
+            strokeWidth={3}
+            className="pointer-events-none absolute right-2 z-[1] size-12 -translate-x-2 text-[#f5d76e] opacity-0 transition duration-300 ease-out group-hover:translate-x-0 group-hover:opacity-100 sm:right-3 sm:size-14"
+          />
+        </Link>
+      </aside>
 
       {sessions.length === 0 ? (
-        <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground ring-0">
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            No sessions yet. Create one to start stacking.
-          </CardContent>
-        </Card>
+        <p className="px-1 text-sm text-[#f4f7f0]/60">
+          No sessions yet. Create one to start stacking.
+        </p>
       ) : (
         <ul className="grid gap-3">
           {sessions.map((s, i) => (
@@ -119,73 +131,40 @@ export function SessionList() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.03 }}
             >
-              <Card className="border-[var(--border)] bg-[var(--panel)] text-foreground ring-0">
-                <CardHeader className="gap-2 px-4 pt-4 pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <CardTitle className="font-display truncate text-xl tracking-wide text-[var(--line)]">
-                        {s.title}
-                      </CardTitle>
-                      <CardDescription className="text-muted-foreground">
-                        {s.id} · Updated {formatWhen(s.updatedAt)}
-                      </CardDescription>
-                    </div>
-                    <Badge
-                      variant="secondary"
-                      className={
-                        s.status === "active"
-                          ? "border-primary/30 bg-primary/15 text-primary"
-                          : "bg-muted text-muted-foreground"
-                      }
-                    >
-                      {s.status}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="grid gap-3 px-4 pb-4">
-                  <div className="flex flex-wrap gap-1.5">
-                    <Badge
-                      variant="secondary"
-                      className="gap-1 bg-muted text-foreground"
-                    >
-                      <Layers3 className="size-3.5" />
-                      {s.courtCount} courts
-                    </Badge>
-                    <Badge
-                      variant="secondary"
-                      className="gap-1 bg-muted text-foreground"
-                    >
-                      <Clock3 className="size-3.5" />
+              <div className="group relative flex items-center gap-1 overflow-hidden rounded-2xl border border-[#e8f5a0]/25 bg-[#0f2e1c] pr-12 transition hover:border-[#e8f5a0]/45 hover:bg-[#163828] sm:pr-16">
+                <button
+                  type="button"
+                  className="relative z-[1] flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left sm:px-5 sm:py-4"
+                  onClick={() => router.push(`/s/${s.id}`)}
+                >
+                  <PaddleStackMark className="mt-0.5 h-10 w-10 shrink-0 self-start" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-[#f5d76e] underline-offset-2 group-hover:underline">
+                      {s.title}
+                    </span>
+                    <span className="mt-1 block text-sm text-[#f4f7f0]/65">
+                      {s.courtCount} courts · {s.playerCount} stacked ·{" "}
                       {s.hours}h · {formatDuration(Date.now() - s.startedAt)} in
-                    </Badge>
-                    <Badge
-                      variant="secondary"
-                      className="gap-1 bg-muted text-foreground"
-                    >
-                      {s.playerCount} players
-                    </Badge>
-                  </div>
-                  <div className="grid grid-cols-[1fr_auto] gap-2">
-                    <Button
-                      type="button"
-                      className="font-display h-11 tracking-wide uppercase"
-                      onClick={() => router.push(`/s/${s.id}`)}
-                    >
-                      Open
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="h-11 w-11 border-[var(--border)] bg-transparent text-muted-foreground hover:bg-muted hover:text-destructive"
-                      aria-label={`Delete session ${s.id}`}
-                      onClick={() => setPendingDelete(s)}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                    </span>
+                    <span className="mt-0.5 block text-xs text-[#f4f7f0]/45">
+                      {s.id} · {s.status} · Updated {formatWhen(s.updatedAt)}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Delete session ${s.id}`}
+                  className="relative z-[2] mr-1 flex size-9 shrink-0 items-center justify-center rounded-lg text-[#f4f7f0]/40 hover:text-[#ff6b4a]"
+                  onClick={() => setPendingDelete(s)}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+                <ChevronRight
+                  aria-hidden
+                  strokeWidth={3}
+                  className="pointer-events-none absolute right-2 z-[1] size-12 -translate-x-2 text-[#f5d76e] opacity-0 transition duration-300 ease-out group-hover:translate-x-0 group-hover:opacity-100 sm:right-3 sm:size-14"
+                />
+              </div>
             </motion.li>
           ))}
         </ul>
@@ -197,23 +176,23 @@ export function SessionList() {
           if (!open) setPendingDelete(null);
         }}
       >
-        <AlertDialogContent className="border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)]">
+        <AlertDialogContent className="rounded-2xl border-[#e8f5a0]/25 bg-[#163828] text-[#f4f7f0]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="font-display tracking-wide uppercase">
-              Are you sure?
+            <AlertDialogTitle className="font-display tracking-wide text-[#e8f5a0]">
+              Delete this stack?
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground">
+            <AlertDialogDescription className="text-[#f4f7f0]/70">
               Delete session {pendingDelete?.id}? This cannot be undone on this
               device.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="border-[var(--border)] bg-transparent">
-            <AlertDialogCancel className="border-[var(--border)] bg-transparent text-foreground">
+          <AlertDialogFooter className="border-[#e8f5a0]/15 bg-transparent">
+            <AlertDialogCancel className="rounded-xl border-[#e8f5a0]/30 bg-transparent text-[#f4f7f0]">
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              className="font-display tracking-wide uppercase"
+              className="rounded-xl font-semibold"
               onClick={confirmDelete}
             >
               Delete

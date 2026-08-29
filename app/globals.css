@@ -42,7 +42,7 @@
   --chart-3: #ff8a3d;
   --chart-4: #246b3e;
   --chart-5: #1a4d2e;
-  --radius: 0.35rem;
+  --radius: 0.75rem;
   --sidebar: #1a4d2e;
   --sidebar-foreground: #f4f7f0;
   --sidebar-primary: #f5d76e;
@@ -114,6 +114,13 @@
   textarea,
   select {
     font-size: 16px;
+  }
+
+  button:not(:disabled),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
   }
 }
 
@@ -233,4 +240,31 @@
 
 .welcome-hex__skip:hover {
   color: rgba(244, 247, 240, 0.85);
+}
+
+@keyframes shiny-gold-sheen {
+  0%,
+  40% {
+    transform: translateX(-30%) skewX(-20deg);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  70%,
+  100% {
+    transform: translateX(280%) skewX(-20deg);
+    opacity: 0;
+  }
+}
+
+.shiny-gold-sheen {
+  animation: shiny-gold-sheen 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shiny-gold-sheen {
+    animation: none;
+    display: none;
+  }
 }

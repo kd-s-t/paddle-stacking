@@ -47,16 +47,36 @@ function toSummary(session: Session): SessionSummary {
 
 function normalizeSession(parsed: Session): Session | null {
   if (!parsed?.id || !Array.isArray(parsed.players)) return null;
+  const sessionWasPaused =
+    parsed.status === "paused" && typeof parsed.pausedAt === "number"
+      ? parsed.pausedAt
+      : undefined;
   const base = {
     ...parsed,
     title: parsed.title?.trim() || DEFAULT_SESSION_TITLE,
     status: parsed.status === "ended" ? "ended" : "active",
+    pausedAt: undefined,
     updatedAt: parsed.updatedAt ?? parsed.startedAt ?? Date.now(),
     playSeq: typeof parsed.playSeq === "number" ? parsed.playSeq : 0,
+    matchHistory: Array.isArray(parsed.matchHistory)
+      ? parsed.matchHistory.filter(
+          (m) =>
+            m != null &&
+            typeof m.id === "string" &&
+            (m.winner === "A" || m.winner === "B") &&
+            Array.isArray(m.teamA) &&
+            Array.isArray(m.teamB),
+        )
+      : [],
     undoStack: Array.isArray(parsed.undoStack) ? parsed.undoStack : [],
     courts: Array.isArray(parsed.courts)
       ? parsed.courts.map((c) => ({
           ...c,
+          playerIds: Array.isArray(c.playerIds) ? [...c.playerIds] : [],
+          queue: Array.isArray(c.queue) ? [...c.queue] : [],
+          playSeq: typeof c.playSeq === "number" ? c.playSeq : 0,
+          pausedAt:
+            typeof c.pausedAt === "number" ? c.pausedAt : sessionWasPaused,
           startedAt:
             Array.isArray(c.playerIds) &&
             c.playerIds.length === 4 &&

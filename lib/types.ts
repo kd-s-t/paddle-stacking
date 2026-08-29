@@ -12,6 +12,8 @@ export type Player = {
   lastOutcome?: "win" | "loss";
   /** Session playSeq when they last left a court (for rest / no back-to-back). */
   lastPlaySeq?: number;
+  /** Court this player stacks on (independent rotation). */
+  homeCourt?: number;
 };
 
 export type MatchResult = {
@@ -22,13 +24,34 @@ export type MatchResult = {
   scoreB?: number;
 };
 
+export type PlayedMatch = {
+  id: string;
+  court: number;
+  /** playSeq after this match finished */
+  playSeq: number;
+  /** When the foursome started on court (if known) */
+  startedAt?: number;
+  finishedAt: number;
+  winner: "A" | "B";
+  scoreA?: number;
+  scoreB?: number;
+  teamA: { id: string; name: string; number: number }[];
+  teamB: { id: string; name: string; number: number }[];
+};
+
 /** One independent court; rotates on its own when done. */
 export type CourtSlot = {
   id: number;
   /** 0 or 4 player ids */
   playerIds: string[];
+  /** Waiting stack for this court only */
+  queue: string[];
+  /** Bumps when this court finishes; rest is per-court. */
+  playSeq: number;
   /** When the current foursome started on this court */
   startedAt?: number;
+  /** Wall clock when this court was paused. */
+  pausedAt?: number;
   result?: MatchResult;
 };
 
@@ -39,6 +62,8 @@ export type Match = {
   result?: MatchResult;
   /** When this match started on court */
   startedAt?: number;
+  /** Wall clock when this court was paused. */
+  pausedAt?: number;
   /** True when this court has enough players for doubles */
   ready: boolean;
 };
@@ -58,9 +83,12 @@ export type SessionStatus = "active" | "ended";
 export type SessionSnapshot = SessionConfig & {
   id: string;
   players: Player[];
+  /** @deprecated Global stack; migrated onto each court's queue. */
   queue: string[];
   courts: CourtSlot[];
-  /** Bumps every time a court finishes; used so players rest before replaying. */
+  /** Finished matches in this session (oldest → newest). */
+  matchHistory: PlayedMatch[];
+  /** Bumps every time a court finishes. */
   playSeq: number;
   startedAt: number;
   updatedAt: number;
@@ -94,5 +122,5 @@ export const LEGACY_SESSION_KEY = "paddle-stacking-session-v2";
 /** Default ~15 minute games */
 export const DEFAULT_GAME_LENGTH_HOURS = 0.25;
 export const PLAYERS_PER_COURT = 4;
-export const HOUR_OPTIONS = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8] as const;
+export const HOUR_OPTIONS = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8] as const;
 export const DEFAULT_SESSION_TITLE = "Open Play";
